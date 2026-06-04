@@ -1,0 +1,84 @@
+namespace Cirreum.Authentication.ApiKey;
+
+/// <summary>
+/// Provides validation utilities for API keys that can be shared across resolvers.
+/// </summary>
+public interface IApiKeyValidator {
+
+	/// <summary>
+	/// Validates the format of an API key (length, characters, etc.).
+	/// </summary>
+	/// <param name="key">The key to validate.</param>
+	/// <returns>A result indicating whether the format is valid.</returns>
+	ApiKeyFormatValidationResult ValidateFormat(string key);
+
+	/// <summary>
+	/// Performs a constant-time comparison of two keys to prevent timing attacks.
+	/// Use this for plain-text key comparison.
+	/// </summary>
+	/// <param name="providedKey">The key provided in the request.</param>
+	/// <param name="expectedKey">The expected key value.</param>
+	/// <returns><see langword="true"/> if the keys match; otherwise, <see langword="false"/>.</returns>
+	bool CompareKeysSecurely(string providedKey, string expectedKey);
+
+	/// <summary>
+	/// Performs a constant-time comparison of two keys to prevent timing attacks.
+	/// Use this overload for allocation-free comparison when keys are already encoded as bytes.
+	/// </summary>
+	/// <param name="providedKey">The key provided in the request as UTF-8 bytes.</param>
+	/// <param name="expectedKey">The expected key value as UTF-8 bytes.</param>
+	/// <returns><see langword="true"/> if the keys match; otherwise, <see langword="false"/>.</returns>
+	bool CompareKeysSecurely(ReadOnlySpan<byte> providedKey, ReadOnlySpan<byte> expectedKey);
+
+	/// <summary>
+	/// Validates a provided key against a stored hash.
+	/// Use this for hashed key storage (recommended for database storage).
+	/// </summary>
+	/// <param name="providedKey">The key provided in the request.</param>
+	/// <param name="storedHash">The stored hash to compare against.</param>
+	/// <param name="salt">Optional salt used in hashing.</param>
+	/// <returns><see langword="true"/> if the key matches the hash; otherwise, <see langword="false"/>.</returns>
+	bool ValidateKeyHash(string providedKey, string storedHash, string? salt = null);
+
+	/// <summary>
+	/// Checks whether an API key has expired.
+	/// </summary>
+	/// <param name="expiresAt">The expiration time, or <see langword="null"/> if no expiration.</param>
+	/// <param name="gracePeriod">Optional grace period to allow after expiration.</param>
+	/// <returns><see langword="true"/> if the key has expired; otherwise, <see langword="false"/>.</returns>
+	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null);
+
+	/// <summary>
+	/// Generates a secure hash for storing an API key.
+	/// </summary>
+	/// <param name="key">The key to hash.</param>
+	/// <param name="salt">Optional salt to use (generated if not provided).</param>
+	/// <returns>The hash result containing the hash and salt used.</returns>
+	ApiKeyHashResult HashKey(string key, string? salt = null);
+}
+
+/// <summary>
+/// Result of API key format validation.
+/// </summary>
+/// <param name="IsValid">Whether the format is valid.</param>
+/// <param name="ErrorReason">The reason for invalidity, if applicable.</param>
+public readonly record struct ApiKeyFormatValidationResult(bool IsValid, string? ErrorReason) {
+
+	/// <summary>
+	/// Creates a valid result.
+	/// </summary>
+	public static ApiKeyFormatValidationResult Valid() => new(true, null);
+
+	/// <summary>
+	/// Creates an invalid result with a reason.
+	/// </summary>
+	/// <param name="reason">The reason the format is invalid.</param>
+	public static ApiKeyFormatValidationResult Invalid(string reason) => new(false, reason);
+}
+
+/// <summary>
+/// Result of hashing an API key.
+/// </summary>
+/// <param name="Hash">The computed hash.</param>
+/// <param name="Salt">The salt used in hashing.</param>
+public readonly record struct ApiKeyHashResult(string Hash, string Salt);
