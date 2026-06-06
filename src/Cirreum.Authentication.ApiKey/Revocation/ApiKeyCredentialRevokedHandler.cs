@@ -9,8 +9,9 @@ using Cirreum.Authentication.Events;
 /// <c>"apikey"</c>; ids for other credential types never match an ApiKey <c>ClientId</c>, so storing
 /// them is harmless.
 /// </summary>
-internal sealed class ApiKeyCredentialRevokedHandler(IApiKeyDenylist denylist)
-	: IAuthenticationEventHandler<CredentialRevoked> {
+internal sealed class ApiKeyCredentialRevokedHandler(
+	IApiKeyDenylist denylist
+) : IAuthenticationEventHandler<CredentialRevoked> {
 
 	/// <summary>The <see cref="CredentialRevoked.CredentialType"/> value this scheme publishes/handles.</summary>
 	public const string ApiKeyCredentialType = "apikey";

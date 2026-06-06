@@ -14,7 +14,8 @@ using Microsoft.Extensions.Logging;
 internal sealed class ApiKeyRevocationHydrator(
 	IEnumerable<IRevokedCredentialProvider> providers,
 	IApiKeyDenylist denylist,
-	ILogger<ApiKeyRevocationHydrator> logger) : IHostedService {
+	ILogger<ApiKeyRevocationHydrator> logger
+) : IHostedService {
 
 	/// <inheritdoc />
 	public async Task StartAsync(CancellationToken cancellationToken) {
