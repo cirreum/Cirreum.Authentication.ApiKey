@@ -134,6 +134,10 @@ public class ApiKeyAuthenticationHandler(
 			claims.Add(new Claim(ClaimTypes.Role, role));
 		}
 
+		foreach (var scope in client.Scopes) {
+			claims.Add(new Claim("scope", scope));
+		}
+
 		if (client.Claims is not null) {
 			foreach (var (claimType, claimValue) in client.Claims) {
 				claims.Add(new Claim(claimType, claimValue));

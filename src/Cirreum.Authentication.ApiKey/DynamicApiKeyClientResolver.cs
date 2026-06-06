@@ -137,11 +137,13 @@ public abstract class DynamicApiKeyClientResolver(
 				continue;
 			}
 
-			// 4. Check expiration (RequireExpiry enforced per the store's profile)
-			if (this._validator.IsExpired(storedKey.ExpiresAt, null, profile)) {
+			// 4. Check expiration (RequireExpiry enforced per the store's profile) and the
+			//    cryptoperiod / max-age (per-key override tightens the configured cap).
+			if (this._validator.IsExpired(storedKey.ExpiresAt, null, profile)
+				|| this._validator.IsBeyondMaxAge(storedKey.CreatedAt, storedKey.MaxKeyAge)) {
 				if (this._logger.IsEnabled(LogLevel.Debug)) {
 					this._logger.LogDebug(
-						"API key expired for client {ClientId} on header {HeaderName}",
+						"API key expired or beyond max age for client {ClientId} on header {HeaderName}",
 						storedKey.ClientId,
 						headerName);
 				}

@@ -124,6 +124,33 @@ public sealed class DefaultApiKeyValidator(
 	}
 
 	/// <inheritdoc/>
+	public bool IsBeyondMaxAge(DateTimeOffset? createdAt, TimeSpan? perKeyMaxAge = null) {
+		if (this._options.AllowExpiredKeys) {
+			return false;
+		}
+
+		// Tighten-only: the effective cap is the shorter of the configured and per-key max ages.
+		var effectiveMaxAge = MinTimeSpan(this._options.MaxKeyAge, perKeyMaxAge);
+		if (effectiveMaxAge is null || createdAt is null) {
+			return false;
+		}
+
+		return DateTimeOffset.UtcNow > createdAt.Value.Add(effectiveMaxAge.Value);
+	}
+
+	private static TimeSpan? MinTimeSpan(TimeSpan? a, TimeSpan? b) {
+		if (a is null) {
+			return b;
+		}
+
+		if (b is null) {
+			return a;
+		}
+
+		return a.Value <= b.Value ? a : b;
+	}
+
+	/// <inheritdoc/>
 	public ApiKeyHashResult HashKey(string key, string? salt = null) {
 		ArgumentException.ThrowIfNullOrWhiteSpace(key);
 

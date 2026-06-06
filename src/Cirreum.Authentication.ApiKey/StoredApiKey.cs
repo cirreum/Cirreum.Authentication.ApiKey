@@ -47,6 +47,32 @@ public record StoredApiKey {
 	/// </summary>
 	public IReadOnlyDictionary<string, string>? Claims { get; init; }
 
+	// ---- Per-key overrides (ADR-0020 §9) — captured at key creation, may only tighten ----------
+
+	/// <summary>
+	/// Gets the time this key was created. Required to enforce <see cref="MaxKeyAge"/> /
+	/// the conformance profile's cryptoperiod (NIST SP 800-57).
+	/// </summary>
+	public DateTimeOffset? CreatedAt { get; init; }
+
+	/// <summary>
+	/// Gets an optional per-key maximum age (cryptoperiod). It may only <em>tighten</em> the active
+	/// provider cap: the effective max age is the shorter of this and the configured
+	/// <c>ApiKeyValidationOptions.MaxKeyAge</c>. Enforced against <see cref="CreatedAt"/>.
+	/// </summary>
+	public TimeSpan? MaxKeyAge { get; init; }
+
+	/// <summary>
+	/// Gets an optional per-key failed-attempt throttle limit (policy, not state). Persisted with the
+	/// key; enforcement is part of the in-app throttle (deferred — ADR-0020 §3/§8).
+	/// </summary>
+	public int? ThrottleLimit { get; init; }
+
+	/// <summary>
+	/// Gets optional per-key scopes, surfaced as <c>scope</c> claims on the authenticated identity.
+	/// </summary>
+	public IReadOnlyList<string>? Scopes { get; init; }
+
 	/// <summary>
 	/// Converts this stored key to an <see cref="ApiKeyClient"/> for authentication.
 	/// </summary>
@@ -56,7 +82,8 @@ public record StoredApiKey {
 		ClientName = this.ClientName,
 		Roles = this.Roles,
 		ExpiresAt = this.ExpiresAt,
-		Claims = this.Claims
+		Claims = this.Claims,
+		Scopes = this.Scopes ?? []
 	};
 
 }

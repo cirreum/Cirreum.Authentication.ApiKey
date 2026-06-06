@@ -53,6 +53,18 @@ public interface IApiKeyValidator {
 	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null, ApiKeyConformanceProfile? profile = null);
 
 	/// <summary>
+	/// Checks whether a key has exceeded its maximum age / cryptoperiod (NIST SP 800-57), measured from
+	/// <paramref name="createdAt"/>. The effective max age is the <em>shorter</em> (tighten-only) of the
+	/// configured <c>ApiKeyValidationOptions.MaxKeyAge</c> and the per-key
+	/// <paramref name="perKeyMaxAge"/>. Returns <see langword="false"/> when neither cap is set or
+	/// <paramref name="createdAt"/> is unknown.
+	/// </summary>
+	/// <param name="createdAt">When the key was created.</param>
+	/// <param name="perKeyMaxAge">An optional per-key max-age override (may only tighten the configured cap).</param>
+	/// <returns><see langword="true"/> if the key is older than the effective max age.</returns>
+	bool IsBeyondMaxAge(DateTimeOffset? createdAt, TimeSpan? perKeyMaxAge = null);
+
+	/// <summary>
 	/// Generates a secure hash for storing an API key.
 	/// </summary>
 	/// <param name="key">The key to hash.</param>

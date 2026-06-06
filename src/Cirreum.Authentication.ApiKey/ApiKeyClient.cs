@@ -49,4 +49,10 @@ public sealed record ApiKeyClient {
 	/// </summary>
 	public IReadOnlyDictionary<string, string>? Claims { get; init; }
 
+	/// <summary>
+	/// Gets the scopes granted to this client's credential, surfaced as <c>scope</c> claims on the
+	/// authenticated identity (ADR-0020 §9 per-key overrides).
+	/// </summary>
+	public IReadOnlyList<string> Scopes { get; init; } = [];
+
 }
