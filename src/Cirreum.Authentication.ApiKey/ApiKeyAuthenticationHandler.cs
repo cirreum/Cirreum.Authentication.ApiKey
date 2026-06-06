@@ -40,8 +40,13 @@ public class ApiKeyAuthenticationHandler(
 
 	private const string BearerPrefix = "Bearer ";
 
+	private bool _missingRoutingSignal;
+
 	/// <inheritdoc/>
 	protected override async Task<AuthenticateResult> HandleAuthenticateAsync() {
+
+		// Reset per-invocation state (the handler instance may be reused within a request).
+		this._missingRoutingSignal = false;
 
 		var transport = this.Options.Transport;
 		string? providedKey;
@@ -75,12 +80,26 @@ public class ApiKeyAuthenticationHandler(
 			return AuthenticateResult.Fail($"Unsupported ApiKey transport: {transport}");
 		}
 
-		var context = this.BuildLookupContext(transport, headerName);
+		var matchedSource = this.Request.Headers.TryGetValue(ApiKeyHeaders.Source, out var sourceValues)
+			? sourceValues.FirstOrDefault()
+			: null;
+		if (string.IsNullOrWhiteSpace(matchedSource)) {
+			matchedSource = null;
+		}
+
+		var context = this.BuildLookupContext(transport, headerName, matchedSource);
 
 		var result = await clientResolver.ResolveAsync(
 			providedKey,
 			context,
 			this.Context.RequestAborted);
+
+		if (result.RequiresRouting) {
+			// Missing routing signal → non-descript 400 (see HandleChallengeAsync). Never a blind
+			// scan of expensive stores, never an enumeration of valid sources.
+			this._missingRoutingSignal = true;
+			return AuthenticateResult.Fail(result.FailureReason ?? "Bad request");
+		}
 
 		if (!result.IsSuccess || result.Client is null) {
 			if (this.Logger.IsEnabled(LogLevel.Warning)) {
@@ -139,6 +158,12 @@ public class ApiKeyAuthenticationHandler(
 
 	/// <inheritdoc/>
 	protected override Task HandleChallengeAsync(AuthenticationProperties properties) {
+		if (this._missingRoutingSignal) {
+			// Non-descript 400: no WWW-Authenticate, nothing that enumerates valid sources (ADR-0020 §5).
+			this.Response.StatusCode = 400;
+			return Task.CompletedTask;
+		}
+
 		this.Response.StatusCode = 401;
 		this.Response.Headers.WWWAuthenticate = $"Bearer realm=\"{this.Scheme.Name}\"";
 		return Task.CompletedTask;
@@ -164,7 +189,8 @@ public class ApiKeyAuthenticationHandler(
 
 	private ApiKeyLookupContext BuildLookupContext(
 		CredentialTransport transport,
-		string credentialHeader) {
+		string credentialHeader,
+		string? matchedSource) {
 
 		var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -178,7 +204,7 @@ public class ApiKeyAuthenticationHandler(
 			}
 		}
 
-		return new ApiKeyLookupContext(transport, credentialHeader, headers);
+		return new ApiKeyLookupContext(transport, credentialHeader, headers, matchedSource);
 	}
 
 }

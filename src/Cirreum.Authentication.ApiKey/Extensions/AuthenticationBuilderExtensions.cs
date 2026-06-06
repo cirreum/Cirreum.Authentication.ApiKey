@@ -193,37 +193,49 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 		var resolverType = options.DynamicResolverType;
 
+		// Build the "scan" resolver — the cheap (static config) path, plus the legacy single dynamic
+		// resolver (AddResolver) for back-compat. Named multi-stores (AddDynamicStore) are NOT here;
+		// they are addressable-only and routed by X-Api-Source via the dispatcher below.
+		Func<IServiceProvider, IApiKeyClientResolver> scanFactory;
+
 		if (resolverType is null) {
-			// Configuration-only, or no source at all.
 			if (hasInstances) {
-				services.TryAddSingleton<IApiKeyClientResolver>(sp =>
-					sp.GetRequiredService<ConfigurationApiKeyClientResolver>());
+				scanFactory = sp => sp.GetRequiredService<ConfigurationApiKeyClientResolver>();
 			} else {
-				services.TryAddSingleton<IApiKeyClientResolver, NullApiKeyClientResolver>();
+				services.TryAddSingleton<NullApiKeyClientResolver>();
+				scanFactory = sp => sp.GetRequiredService<NullApiKeyClientResolver>();
 			}
-			return;
-		}
-
-		// Dynamic resolver present — register it as its concrete type.
-		services.TryAddSingleton(resolverType);
-		if (options.CachingConfigure is not null) {
-			services.Configure(options.CachingConfigure);
-		}
-
-		services.Replace(ServiceDescriptor.Singleton<IApiKeyClientResolver>(sp => {
-			var dynamicResolver = WrapWithCaching(
-				(IApiKeyClientResolver)sp.GetRequiredService(resolverType),
-				options.CachingConfigure is not null,
-				sp);
-
-			if (!hasInstances) {
-				return dynamicResolver;
+		} else {
+			services.TryAddSingleton(resolverType);
+			if (options.CachingConfigure is not null) {
+				services.Configure(options.CachingConfigure);
 			}
 
-			return new CompositeApiKeyClientResolver(
-				[sp.GetRequiredService<ConfigurationApiKeyClientResolver>(), dynamicResolver],
-				sp.GetRequiredService<ILogger<CompositeApiKeyClientResolver>>());
-		}));
+			scanFactory = sp => {
+				var dynamicResolver = WrapWithCaching(
+					(IApiKeyClientResolver)sp.GetRequiredService(resolverType),
+					options.CachingConfigure is not null,
+					sp);
+
+				if (!hasInstances) {
+					return dynamicResolver;
+				}
+
+				return new CompositeApiKeyClientResolver(
+					[sp.GetRequiredService<ConfigurationApiKeyClientResolver>(), dynamicResolver],
+					sp.GetRequiredService<ILogger<CompositeApiKeyClientResolver>>());
+			};
+		}
+
+		// The handler's IApiKeyClientResolver is the source-aware dispatcher: it routes X-Api-Source
+		// to keyed store resolvers (O(1)), restricts the blind scan to the cheap path, and emits the
+		// missing-routing-signal result (→ 400) when appropriate (ADR-0020 §5).
+		services.AddSingleton<IApiKeyClientResolver>(sp =>
+			new SourceDispatchingApiKeyClientResolver(
+				scanFactory(sp),
+				sp.GetRequiredService<IApiKeySourceCatalog>(),
+				sp,
+				sp.GetRequiredService<ILogger<SourceDispatchingApiKeyClientResolver>>()));
 	}
 
 	private static IApiKeyClientResolver WrapWithCaching(

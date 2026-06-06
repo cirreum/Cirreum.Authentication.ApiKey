@@ -77,6 +77,14 @@ public sealed class ApiKeyOptions {
 	/// is wrapped in a <see cref="CachingApiKeyClientResolver"/> with these options;
 	/// when <see langword="null"/>, no caching layer is added.</param>
 	/// <returns>This options instance for chaining.</returns>
+	/// <remarks>
+	/// This is the legacy single-resolver path: it is part of the <b>blind fallback scan</b> (the cheap
+	/// path), so it is restricted to the <c>Baseline</c> profile and SHA-256 hashing — composition fails
+	/// fast otherwise (ADR-0020 §5). For a hardened / addressable-only store, or to run several stores
+	/// with distinct profiles, use <see cref="AddDynamicStore{TResolver}"/> instead; the two are not
+	/// composed together. The resolver is a singleton — depend only on singleton-safe services (e.g.
+	/// inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped data access).
+	/// </remarks>
 	public ApiKeyOptions AddResolver<TResolver>(Action<ApiKeyCachingOptions>? caching = null)
 		where TResolver : class, IApiKeyClientResolver {
 		this.DynamicResolverType = typeof(TResolver);
@@ -93,8 +101,13 @@ public sealed class ApiKeyOptions {
 	/// </summary>
 	/// <typeparam name="TResolver">The app's resolver implementation for this store.</typeparam>
 	/// <param name="friendlyName">The code-given store name; the input to the opaque SourceRef derivation.</param>
-	/// <param name="profile">The conformance profile this store enforces.</param>
+	/// <param name="profile">The conformance profile this store enforces (per-store; ADR-0020 §4).</param>
 	/// <returns>This options instance for chaining.</returns>
+	/// <remarks>
+	/// The store resolver is registered as a singleton keyed by the derived SourceRef — depend only on
+	/// singleton-safe services (inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped
+	/// data access). Friendly names must be unique; a duplicate (or a SourceRef collision) fails fast.
+	/// </remarks>
 	public ApiKeyOptions AddDynamicStore<TResolver>(string friendlyName, ApiKeyConformanceProfile profile)
 		where TResolver : class, IApiKeyClientResolver {
 		ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);

@@ -21,20 +21,19 @@ public sealed class ApiKeySourceCatalog : IApiKeySourceCatalog {
 	}
 
 	/// <summary>
-	/// Registers a source. Throws if two distinct friendly names derive the same
-	/// <see cref="IApiKeySource.SourceRef"/> (a collision the operator must resolve by renaming).
+	/// Registers a source. Throws on any duplicate <see cref="IApiKeySource.SourceRef"/>: either the
+	/// same store registered twice, or two distinct friendly names that derive the same reference (a
+	/// collision the operator must resolve by renaming).
 	/// </summary>
 	internal void Register(IApiKeySource source) {
 		ArgumentNullException.ThrowIfNull(source);
 
 		if (this._byRef.TryGetValue(source.SourceRef, out var existing)) {
-			if (!string.Equals(existing.FriendlyName, source.FriendlyName, StringComparison.Ordinal)) {
-				throw new InvalidOperationException(
-					$"ApiKey source reference collision: '{existing.FriendlyName}' and " +
-					$"'{source.FriendlyName}' both derive '{source.SourceRef}'. Rename one store.");
-			}
-
-			return;
+			throw new InvalidOperationException(
+				string.Equals(existing.FriendlyName, source.FriendlyName, StringComparison.Ordinal)
+					? $"ApiKey store '{source.FriendlyName}' is registered more than once."
+					: $"ApiKey source reference collision: '{existing.FriendlyName}' and " +
+					  $"'{source.FriendlyName}' both derive '{source.SourceRef}'. Rename one store.");
 		}
 
 		this._byRef[source.SourceRef] = source;

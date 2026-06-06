@@ -20,6 +20,12 @@ public sealed record ApiKeyResolveResult {
 	/// </summary>
 	public string? FailureReason { get; private init; }
 
+	/// <summary>
+	/// Gets whether the failure is a missing routing signal (no <c>X-Api-Source</c> while addressable
+	/// stores exist), which the handler maps to a non-descript <c>400</c> rather than a <c>401</c>.
+	/// </summary>
+	public bool RequiresRouting { get; private init; }
+
 	private ApiKeyResolveResult() { }
 
 	/// <summary>
@@ -62,5 +68,18 @@ public sealed record ApiKeyResolveResult {
 		new() {
 			IsSuccess = false,
 			FailureReason = "API key has expired"
+		};
+
+	/// <summary>
+	/// Creates a result indicating no routing signal was supplied (an <c>ak_</c> Bearer credential
+	/// reached the ApiKey scheme, no cheap store matched, addressable stores exist, and no
+	/// <c>X-Api-Source</c> was provided). The handler maps this to a non-descript <c>400</c> — it
+	/// must never trigger a blind scan of expensive stores, nor enumerate valid sources (ADR-0020 §5).
+	/// </summary>
+	public static ApiKeyResolveResult MissingRoutingSignal() =>
+		new() {
+			IsSuccess = false,
+			RequiresRouting = true,
+			FailureReason = "Missing API key routing signal"
 		};
 }

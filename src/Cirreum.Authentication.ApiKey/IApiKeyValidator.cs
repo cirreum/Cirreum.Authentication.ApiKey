@@ -6,11 +6,13 @@ namespace Cirreum.Authentication.ApiKey;
 public interface IApiKeyValidator {
 
 	/// <summary>
-	/// Validates the format of an API key (length, characters, etc.).
+	/// Validates the format of an API key (length, characters, entropy floor).
 	/// </summary>
 	/// <param name="key">The key to validate.</param>
+	/// <param name="profile">The per-store conformance profile to enforce, or <see langword="null"/> to
+	/// use the provider-level profile. Determines the effective entropy floor (ADR-0020 §4).</param>
 	/// <returns>A result indicating whether the format is valid.</returns>
-	ApiKeyFormatValidationResult ValidateFormat(string key);
+	ApiKeyFormatValidationResult ValidateFormat(string key, ApiKeyConformanceProfile? profile = null);
 
 	/// <summary>
 	/// Performs a constant-time comparison of two keys to prevent timing attacks.
@@ -45,8 +47,10 @@ public interface IApiKeyValidator {
 	/// </summary>
 	/// <param name="expiresAt">The expiration time, or <see langword="null"/> if no expiration.</param>
 	/// <param name="gracePeriod">Optional grace period to allow after expiration.</param>
+	/// <param name="profile">The per-store conformance profile to enforce, or <see langword="null"/> to
+	/// use the provider-level profile. Determines whether a missing expiry is rejected (ADR-0020 §4).</param>
 	/// <returns><see langword="true"/> if the key has expired; otherwise, <see langword="false"/>.</returns>
-	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null);
+	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null, ApiKeyConformanceProfile? profile = null);
 
 	/// <summary>
 	/// Generates a secure hash for storing an API key.

@@ -16,11 +16,14 @@ using Cirreum.AuthenticationProvider;
 /// <param name="matchedSource">The resolved store reference from the <c>X-Api-Source</c> routing
 /// header (ADR-0020 §6), or <see langword="null"/> when no store was addressed. A resolver over a
 /// shared backing can scope its lookup to this source (e.g. <c>WHERE store_ref = @ref</c>).</param>
+/// <param name="source">The resolved <see cref="IApiKeySource"/> when an addressable store was routed to
+/// (carries the store's conformance profile for per-store validation), or <see langword="null"/>.</param>
 public sealed class ApiKeyLookupContext(
 	CredentialTransport transport,
 	string headerName,
 	IReadOnlyDictionary<string, string> headers,
-	string? matchedSource = null) {
+	string? matchedSource = null,
+	IApiKeySource? source = null) {
 
 	private readonly IReadOnlyDictionary<string, string> _headers = headers ?? new Dictionary<string, string>();
 
@@ -35,6 +38,12 @@ public sealed class ApiKeyLookupContext(
 	/// performs full credential validation; never branch a trust decision on it.
 	/// </summary>
 	public string? MatchedSource { get; } = matchedSource;
+
+	/// <summary>
+	/// Gets the resolved <see cref="IApiKeySource"/> for an addressed store (carrying its conformance
+	/// profile), or <see langword="null"/> when no addressable store was routed to.
+	/// </summary>
+	public IApiKeySource? Source { get; } = source;
 
 	/// <summary>
 	/// Gets the HTTP header name the credential arrived on

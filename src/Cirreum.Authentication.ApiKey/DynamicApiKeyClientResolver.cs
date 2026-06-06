@@ -102,8 +102,11 @@ public abstract class DynamicApiKeyClientResolver(
 
 		var headerName = context.HeaderName;
 
-		// 1. Validate format
-		var formatResult = this._validator.ValidateFormat(providedKey);
+		// Per-store conformance profile (when routed via X-Api-Source); null falls back to provider-global.
+		var profile = context.Source?.Profile;
+
+		// 1. Validate format (entropy floor enforced per the store's profile)
+		var formatResult = this._validator.ValidateFormat(providedKey, profile);
 		if (!formatResult.IsValid) {
 			if (this._logger.IsEnabled(LogLevel.Debug)) {
 				this._logger.LogDebug(
@@ -134,8 +137,8 @@ public abstract class DynamicApiKeyClientResolver(
 				continue;
 			}
 
-			// 4. Check expiration
-			if (this._validator.IsExpired(storedKey.ExpiresAt)) {
+			// 4. Check expiration (RequireExpiry enforced per the store's profile)
+			if (this._validator.IsExpired(storedKey.ExpiresAt, null, profile)) {
 				if (this._logger.IsEnabled(LogLevel.Debug)) {
 					this._logger.LogDebug(
 						"API key expired for client {ClientId} on header {HeaderName}",

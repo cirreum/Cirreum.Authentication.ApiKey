@@ -88,19 +88,31 @@ public sealed class ApiKeyValidationOptions {
 	public TimeSpan? MaxKeyAge { get; set; }
 
 	/// <summary>
-	/// The effective minimum entropy floor after applying the profile: the larger of
-	/// <see cref="MinimumKeyEntropyBits"/> and the profile floor (0 for Baseline, the
-	/// NIST SP 800-63B §5.1.2 look-up-secret floor for the hardened profiles). Tighten-only.
+	/// The effective minimum entropy floor for the provider-level <see cref="ConformanceProfile"/>.
+	/// See <see cref="EffectiveMinimumEntropyBitsFor"/> for the per-store override.
 	/// </summary>
-	public int EffectiveMinimumEntropyBits =>
-		this.ConformanceProfile == ApiKeyConformanceProfile.Baseline
+	public int EffectiveMinimumEntropyBits => this.EffectiveMinimumEntropyBitsFor(this.ConformanceProfile);
+
+	/// <summary>
+	/// Whether expiry is effectively required for the provider-level <see cref="ConformanceProfile"/>.
+	/// See <see cref="EffectiveRequireExpiryFor"/> for the per-store override.
+	/// </summary>
+	public bool EffectiveRequireExpiry => this.EffectiveRequireExpiryFor(this.ConformanceProfile);
+
+	/// <summary>
+	/// The effective minimum entropy floor when validating under <paramref name="profile"/> (a per-store
+	/// profile): the larger of <see cref="MinimumKeyEntropyBits"/> and the profile floor (0 for Baseline,
+	/// the NIST SP 800-63B §5.1.2 look-up-secret floor for the hardened profiles). Tighten-only.
+	/// </summary>
+	public int EffectiveMinimumEntropyBitsFor(ApiKeyConformanceProfile profile) =>
+		profile == ApiKeyConformanceProfile.Baseline
 			? this.MinimumKeyEntropyBits
 			: Math.Max(DefaultApiKeyGenerator.MinimumEntropyBits, this.MinimumKeyEntropyBits);
 
 	/// <summary>
-	/// Whether expiry is effectively required after applying the profile: <see langword="true"/> when
-	/// the profile is non-Baseline or <see cref="RequireExpiry"/> is set. Tighten-only.
+	/// Whether expiry is effectively required when validating under <paramref name="profile"/> (a per-store
+	/// profile): <see langword="true"/> when the profile is non-Baseline or <see cref="RequireExpiry"/> is set.
 	/// </summary>
-	public bool EffectiveRequireExpiry =>
-		this.ConformanceProfile != ApiKeyConformanceProfile.Baseline || this.RequireExpiry;
+	public bool EffectiveRequireExpiryFor(ApiKeyConformanceProfile profile) =>
+		profile != ApiKeyConformanceProfile.Baseline || this.RequireExpiry;
 }

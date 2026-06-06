@@ -25,7 +25,7 @@ public sealed class DefaultApiKeyValidator(
 	private readonly IApiKeyHasher[] _hashers = hashers as IApiKeyHasher[] ?? [.. hashers];
 
 	/// <inheritdoc/>
-	public ApiKeyFormatValidationResult ValidateFormat(string key) {
+	public ApiKeyFormatValidationResult ValidateFormat(string key, ApiKeyConformanceProfile? profile = null) {
 		if (string.IsNullOrWhiteSpace(key)) {
 			return ApiKeyFormatValidationResult.Invalid("API key cannot be empty");
 		}
@@ -50,7 +50,7 @@ public sealed class DefaultApiKeyValidator(
 			}
 		}
 
-		var entropyFloor = this._options.EffectiveMinimumEntropyBits;
+		var entropyFloor = this._options.EffectiveMinimumEntropyBitsFor(profile ?? this._options.ConformanceProfile);
 		if (entropyFloor > 0 && ApiKeyEntropyEstimator.EstimateBits(key) < entropyFloor) {
 			return ApiKeyFormatValidationResult.Invalid(
 				$"API key does not meet the required minimum entropy of {entropyFloor} bits");
@@ -107,14 +107,14 @@ public sealed class DefaultApiKeyValidator(
 	}
 
 	/// <inheritdoc/>
-	public bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null) {
+	public bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null, ApiKeyConformanceProfile? profile = null) {
 		if (this._options.AllowExpiredKeys) {
 			return false;
 		}
 
 		if (expiresAt is null) {
 			// A key with no expiry is rejected (treated as expired) when the profile/knob requires one.
-			return this._options.EffectiveRequireExpiry;
+			return this._options.EffectiveRequireExpiryFor(profile ?? this._options.ConformanceProfile);
 		}
 
 		var effectiveGracePeriod = gracePeriod ?? this._options.ExpirationGracePeriod;
