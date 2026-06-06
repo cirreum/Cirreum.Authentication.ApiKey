@@ -71,6 +71,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		//    populates the client registry, and registers the schemes the instances use.
 		var providerSettings = BindConfiguredInstances(builder);
 
+		// 1b. Bind the conformance profile + validation knobs and register the crypto primitives
+		//     (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
+		RegisterValidationServices(services, builder.Configuration);
+
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
 		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
 
@@ -98,6 +102,26 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			builder.AuthBuilder);
 
 		return providerSettings;
+	}
+
+	private static void RegisterValidationServices(
+		IServiceCollection services,
+		IConfiguration configuration) {
+
+		// Provider-level validation options (ConformanceProfile + knobs). Framework defaults live on
+		// the options type (= Baseline); per-store overrides layer on in a later phase.
+		services.Configure<ApiKeyValidationOptions>(
+			configuration.GetSection("Cirreum:Authentication:Providers:ApiKey:Validation"));
+
+		// High-entropy key generator.
+		services.TryAddSingleton<IApiKeyGenerator, DefaultApiKeyGenerator>();
+
+		// Self-describing hashers for the dynamic model; selected per the HashAlgorithm knob and
+		// dispatched on verify by the encoded prefix.
+		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher, Sha256ApiKeyHasher>());
+		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher>(sp =>
+			new Pbkdf2ApiKeyHasher(
+				sp.GetRequiredService<IOptions<ApiKeyValidationOptions>>().Value.Pbkdf2Iterations)));
 	}
 
 	private static void RegisterDeclaredTransports(

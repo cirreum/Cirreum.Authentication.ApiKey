@@ -13,11 +13,16 @@ using System.Text;
 /// Initializes a new instance of the <see cref="DefaultApiKeyValidator"/> class.
 /// </remarks>
 /// <param name="options">The validation options.</param>
+/// <param name="hashers">The registered self-describing hashers (e.g. SHA-256, PBKDF2) used by
+/// <see cref="HashKeyEncoded"/> / <see cref="VerifyKey"/>. May be empty when only the legacy
+/// salted-SHA-256 path is in use.</param>
 public sealed class DefaultApiKeyValidator(
-	IOptions<ApiKeyValidationOptions> options
+	IOptions<ApiKeyValidationOptions> options,
+	IEnumerable<IApiKeyHasher> hashers
 ) : IApiKeyValidator {
 
 	private readonly ApiKeyValidationOptions _options = options.Value;
+	private readonly IApiKeyHasher[] _hashers = hashers as IApiKeyHasher[] ?? [.. hashers];
 
 	/// <inheritdoc/>
 	public ApiKeyFormatValidationResult ValidateFormat(string key) {
@@ -43,6 +48,12 @@ public sealed class DefaultApiKeyValidator(
 						$"API key contains invalid character: '{c}'");
 				}
 			}
+		}
+
+		var entropyFloor = this._options.EffectiveMinimumEntropyBits;
+		if (entropyFloor > 0 && ApiKeyEntropyEstimator.EstimateBits(key) < entropyFloor) {
+			return ApiKeyFormatValidationResult.Invalid(
+				$"API key does not meet the required minimum entropy of {entropyFloor} bits");
 		}
 
 		return ApiKeyFormatValidationResult.Valid();
@@ -102,7 +113,8 @@ public sealed class DefaultApiKeyValidator(
 		}
 
 		if (expiresAt is null) {
-			return false;
+			// A key with no expiry is rejected (treated as expired) when the profile/knob requires one.
+			return this._options.EffectiveRequireExpiry;
 		}
 
 		var effectiveGracePeriod = gracePeriod ?? this._options.ExpirationGracePeriod;
@@ -128,6 +140,49 @@ public sealed class DefaultApiKeyValidator(
 
 		return new ApiKeyHashResult(hash, salt);
 	}
+
+	/// <inheritdoc/>
+	public string HashKeyEncoded(string key) {
+		ArgumentException.ThrowIfNullOrWhiteSpace(key);
+		return this.SelectHasher(this._options.HashAlgorithm).Hash(key);
+	}
+
+	/// <inheritdoc/>
+	public bool VerifyKey(string providedKey, string storedHash, string? salt = null) {
+		if (string.IsNullOrEmpty(providedKey) || string.IsNullOrEmpty(storedHash)) {
+			return false;
+		}
+
+		return IsSelfDescribingHash(storedHash)
+			? this.VerifyHashedKey(providedKey, storedHash)
+			: this.ValidateKeyHash(providedKey, storedHash, salt);
+	}
+
+	private bool VerifyHashedKey(string providedKey, string encodedHash) {
+		foreach (var hasher in this._hashers) {
+			if (hasher.Verify(providedKey, encodedHash)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private IApiKeyHasher SelectHasher(ApiKeyHashAlgorithm algorithm) {
+		foreach (var hasher in this._hashers) {
+			if (hasher.Algorithm == algorithm) {
+				return hasher;
+			}
+		}
+
+		throw new InvalidOperationException(
+			$"No {nameof(IApiKeyHasher)} is registered for algorithm '{algorithm}'. " +
+			"Register the ApiKey scheme via AddApiKey(...), which registers the built-in hashers.");
+	}
+
+	private static bool IsSelfDescribingHash(string storedHash) =>
+		storedHash.StartsWith("sha256$", StringComparison.Ordinal) ||
+		storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
 
 	/// <summary>
 	/// Generates a cryptographically secure random salt.

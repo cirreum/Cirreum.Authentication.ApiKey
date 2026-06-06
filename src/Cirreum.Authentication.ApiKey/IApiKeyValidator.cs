@@ -55,6 +55,29 @@ public interface IApiKeyValidator {
 	/// <param name="salt">Optional salt to use (generated if not provided).</param>
 	/// <returns>The hash result containing the hash and salt used.</returns>
 	ApiKeyHashResult HashKey(string key, string? salt = null);
+
+	/// <summary>
+	/// Hashes an API key into a self-describing encoded string (PHC-style
+	/// <c>{algorithm}$…$salt$hash</c>) using the configured <see cref="ApiKeyValidationOptions.HashAlgorithm"/>.
+	/// The algorithm and parameters travel with the value, so verification and work-factor rotation
+	/// need no out-of-band metadata. Recommended for new dynamic (database-backed) keys.
+	/// </summary>
+	/// <param name="key">The raw key to hash.</param>
+	/// <returns>A self-describing encoded hash.</returns>
+	string HashKeyEncoded(string key);
+
+	/// <summary>
+	/// Verifies a presented key against a stored hash, in constant time. Self-describing encoded
+	/// hashes (from <see cref="HashKeyEncoded"/>) are dispatched to the matching hasher; legacy
+	/// bare hashes fall back to <see cref="ValidateKeyHash"/> with the supplied <paramref name="salt"/>.
+	/// </summary>
+	/// <param name="providedKey">The key provided in the request.</param>
+	/// <param name="storedHash">The stored hash (self-describing or legacy bare).</param>
+	/// <param name="salt">The legacy salt. It is <b>required</b> when <paramref name="storedHash"/> is a
+	/// legacy bare hash (passing <see langword="null"/> there will fail verification) and is
+	/// <b>ignored</b> when <paramref name="storedHash"/> is a self-describing hash (the salt is embedded).</param>
+	/// <returns><see langword="true"/> if the key matches; otherwise <see langword="false"/>.</returns>
+	bool VerifyKey(string providedKey, string storedHash, string? salt = null);
 }
 
 /// <summary>
