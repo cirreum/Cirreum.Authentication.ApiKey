@@ -81,6 +81,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// 3. Wire the active IApiKeyClientResolver from the available validation sources.
 		WireResolver(options, services, hasInstances: providerSettings is { Instances.Count: > 0 });
 
+		// 4. Composition fail-fast guards (ADR-0020 §4): a dynamic store must declare an explicit
+		//    profile; SelfContained is rejected until its in-app throttle ships.
+		ApiKeyCompositionValidator.Validate(options, builder.Configuration);
+
 		return builder;
 	}
 
