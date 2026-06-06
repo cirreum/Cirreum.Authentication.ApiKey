@@ -2,6 +2,7 @@ namespace Cirreum.Authentication;
 
 using Cirreum.Authentication.ApiKey;
 using Cirreum.Authentication.Configuration;
+using Cirreum.Authentication.Events;
 using Cirreum.AuthenticationProvider;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -79,6 +80,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		//     resolver is registered in DI keyed by its derived SourceRef for addressable dispatch.
 		RegisterSourceCatalog(services, options);
 
+		// 1d. Register the revocation denylist, the CredentialRevoked auth-event handler, and the
+		//     boot-time hydrator (ADR-0020 §8).
+		RegisterRevocation(services);
+
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
 		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
 
@@ -148,6 +153,13 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			// The store's resolver is addressable by its SourceRef (dispatch wired in P4b).
 			services.AddKeyedSingleton(typeof(IApiKeyClientResolver), sourceRef, store.ResolverType);
 		}
+	}
+
+	private static void RegisterRevocation(IServiceCollection services) {
+		services.TryAddSingleton<IApiKeyDenylist, ApiKeyDenylist>();
+		services.TryAddEnumerable(
+			ServiceDescriptor.Singleton<IAuthenticationEventHandler<CredentialRevoked>, ApiKeyCredentialRevokedHandler>());
+		services.AddHostedService<ApiKeyRevocationHydrator>();
 	}
 
 	private static ApiKeySourceCatalog GetOrAddCatalog(IServiceCollection services) {
@@ -234,6 +246,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			new SourceDispatchingApiKeyClientResolver(
 				scanFactory(sp),
 				sp.GetRequiredService<IApiKeySourceCatalog>(),
+				sp.GetRequiredService<IApiKeyDenylist>(),
 				sp,
 				sp.GetRequiredService<ILogger<SourceDispatchingApiKeyClientResolver>>()));
 	}

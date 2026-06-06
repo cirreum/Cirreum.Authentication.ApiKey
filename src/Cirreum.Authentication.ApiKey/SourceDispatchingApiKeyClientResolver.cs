@@ -16,6 +16,7 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 
 	private readonly IApiKeyClientResolver _scan;
 	private readonly IApiKeySourceCatalog _catalog;
+	private readonly IApiKeyDenylist _denylist;
 	private readonly IServiceProvider _services;
 	private readonly ILogger<SourceDispatchingApiKeyClientResolver> _logger;
 	private readonly bool _hasAddressableStores;
@@ -23,11 +24,13 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 	public SourceDispatchingApiKeyClientResolver(
 		IApiKeyClientResolver scan,
 		IApiKeySourceCatalog catalog,
+		IApiKeyDenylist denylist,
 		IServiceProvider services,
 		ILogger<SourceDispatchingApiKeyClientResolver> logger) {
 
 		this._scan = scan;
 		this._catalog = catalog;
+		this._denylist = denylist;
 		this._services = services;
 		this._logger = logger;
 		this._hasAddressableStores = catalog.Sources.Any(s => s.IsAddressableOnly);
@@ -63,19 +66,35 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 			var routedContext = new ApiKeyLookupContext(
 				context.Transport, context.HeaderName, context.Headers, context.MatchedSource, source);
 
-			return await resolver.ResolveAsync(providedKey, routedContext, cancellationToken);
+			return this.RejectIfRevoked(await resolver.ResolveAsync(providedKey, routedContext, cancellationToken));
 		}
 
 		// No routing signal: blind-scan the cheap (static) path only. Addressable stores are excluded.
 		var result = await this._scan.ResolveAsync(providedKey, context, cancellationToken);
 		if (result.IsSuccess) {
-			return result;
+			return this.RejectIfRevoked(result);
 		}
 
 		// A Bearer (ak_-committed) credential that matched no cheap store, while addressable stores
 		// exist and no X-Api-Source was supplied, is a missing routing signal → non-descript 400.
 		if (this._hasAddressableStores && context.Transport == CredentialTransport.BearerAuthorizationHeader) {
 			return ApiKeyResolveResult.MissingRoutingSignal();
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// Rejects a successful resolution whose credential is on the denylist (revoked), so revocation
+	/// takes effect even within a cache entry's TTL (ADR-0020 §8). Returns a non-descript NotFound.
+	/// </summary>
+	private ApiKeyResolveResult RejectIfRevoked(ApiKeyResolveResult result) {
+		if (result.IsSuccess && result.Client is not null && this._denylist.IsRevoked(result.Client.ClientId)) {
+			if (this._logger.IsEnabled(LogLevel.Debug)) {
+				this._logger.LogDebug("API key for client {ClientId} is revoked (denylist).", result.Client.ClientId);
+			}
+
+			return ApiKeyResolveResult.NotFound();
 		}
 
 		return result;
