@@ -12,16 +12,10 @@
 			Cirreum.Authentication.ApiKey — ApiKey scheme implementation.
 			References Cirreum.AuthenticationProvider for the registrar bases, scheme
 			abstractions (ISchemeSelector, SchemeCategory, CredentialTransport), and
-			AuthenticationContextKeys. Cirreum.Kernel + Cirreum.Common flow
-			in transitively through Cirreum.AuthenticationProvider.
+			AuthenticationContextKeys. Cirreum.Kernel, Cirreum.Contracts, Cirreum.Result,
+			and Cirreum.Providers all flow in transitively through Cirreum.AuthenticationProvider.
 		-->
-		<ProjectReference Include="..\..\..\..\Core\Cirreum.AuthenticationProvider\src\Cirreum.AuthenticationProvider\Cirreum.AuthenticationProvider.csproj" />
-
-		<!-- Cirreum.Result peer NuGet (results from client resolution) -->
-		<PackageReference Include="Cirreum.Result" Version="1.0.16" />
-
-		<!-- Provider infrastructure (1.2.0 carries ProviderType.Authentication=9) -->
-		<PackageReference Include="Cirreum.Providers" Version="1.2.0" />
+		<PackageReference Include="Cirreum.AuthenticationProvider" Version="1.0.0" />
 
 		<!-- ASP.NET shared framework — AuthenticationHandler<TOptions>, HttpContext, ClaimsPrincipal -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
