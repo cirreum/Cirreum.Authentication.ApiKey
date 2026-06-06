@@ -13,10 +13,14 @@ using Cirreum.AuthenticationProvider;
 /// when <paramref name="transport"/> is <see cref="CredentialTransport.BearerAuthorizationHeader"/>.</param>
 /// <param name="headers">All non-credential request headers, for filtering / lookup
 /// optimization. Excludes the credential value for security.</param>
+/// <param name="matchedSource">The resolved store reference from the <c>X-Api-Source</c> routing
+/// header (ADR-0020 §6), or <see langword="null"/> when no store was addressed. A resolver over a
+/// shared backing can scope its lookup to this source (e.g. <c>WHERE store_ref = @ref</c>).</param>
 public sealed class ApiKeyLookupContext(
 	CredentialTransport transport,
 	string headerName,
-	IReadOnlyDictionary<string, string> headers) {
+	IReadOnlyDictionary<string, string> headers,
+	string? matchedSource = null) {
 
 	private readonly IReadOnlyDictionary<string, string> _headers = headers ?? new Dictionary<string, string>();
 
@@ -24,6 +28,13 @@ public sealed class ApiKeyLookupContext(
 	/// Gets the transport the credential was extracted from.
 	/// </summary>
 	public CredentialTransport Transport { get; } = transport;
+
+	/// <summary>
+	/// Gets the resolved store reference from the <c>X-Api-Source</c> routing header (ADR-0020 §6),
+	/// or <see langword="null"/> when no store was addressed. A routing hint only — the resolver still
+	/// performs full credential validation; never branch a trust decision on it.
+	/// </summary>
+	public string? MatchedSource { get; } = matchedSource;
 
 	/// <summary>
 	/// Gets the HTTP header name the credential arrived on

@@ -33,6 +33,7 @@ public sealed class ApiKeyOptions {
 
 	private readonly List<string> _transports = [];
 	private readonly List<string> _customHeaders = [];
+	private readonly List<ApiKeyDynamicStoreRegistration> _dynamicStores = [];
 
 	/// <summary>
 	/// Adds a well-known transport (a value from <see cref="ApiKeyTransports"/>). Opts the
@@ -83,6 +84,24 @@ public sealed class ApiKeyOptions {
 		return this;
 	}
 
+	/// <summary>
+	/// Registers a named dynamic (database-backed) key store with its own conformance profile
+	/// (ADR-0020 §4). Each store is addressable-only: it is reached via an explicit <c>X-Api-Source</c>
+	/// reference derived from <paramref name="friendlyName"/> and is never part of the blind fallback
+	/// scan. Multiple stores may be registered to run different postures side by side (e.g. an internal
+	/// store and a regulated-partner store).
+	/// </summary>
+	/// <typeparam name="TResolver">The app's resolver implementation for this store.</typeparam>
+	/// <param name="friendlyName">The code-given store name; the input to the opaque SourceRef derivation.</param>
+	/// <param name="profile">The conformance profile this store enforces.</param>
+	/// <returns>This options instance for chaining.</returns>
+	public ApiKeyOptions AddDynamicStore<TResolver>(string friendlyName, ApiKeyConformanceProfile profile)
+		where TResolver : class, IApiKeyClientResolver {
+		ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);
+		this._dynamicStores.Add(new ApiKeyDynamicStoreRegistration(friendlyName, profile, typeof(TResolver)));
+		return this;
+	}
+
 	/// <summary>True when the app declared any transport explicitly (modes B/C); false
 	/// selects the all-well-known default (mode A).</summary>
 	internal bool HasExplicitTransports => _transports.Count > 0 || _customHeaders.Count > 0;
@@ -100,5 +119,8 @@ public sealed class ApiKeyOptions {
 	/// <summary>Caching configuration for the dynamic resolver, or <see langword="null"/>
 	/// when no caching layer is requested.</summary>
 	internal Action<ApiKeyCachingOptions>? CachingConfigure { get; private set; }
+
+	/// <summary>The named dynamic stores declared via <see cref="AddDynamicStore{TResolver}"/>.</summary>
+	internal IReadOnlyList<ApiKeyDynamicStoreRegistration> DynamicStores => this._dynamicStores;
 
 }

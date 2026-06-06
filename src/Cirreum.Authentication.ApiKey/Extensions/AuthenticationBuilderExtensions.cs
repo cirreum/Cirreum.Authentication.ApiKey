@@ -75,6 +75,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		//     (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
 		RegisterValidationServices(services, builder.Configuration);
 
+		// 1c. Register the source catalog and any named dynamic stores (ADR-0020 §4/§6). Each store's
+		//     resolver is registered in DI keyed by its derived SourceRef for addressable dispatch.
+		RegisterSourceCatalog(services, options);
+
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
 		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
 
@@ -126,6 +130,36 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher>(sp =>
 			new Pbkdf2ApiKeyHasher(
 				sp.GetRequiredService<IOptions<ApiKeyValidationOptions>>().Value.Pbkdf2Iterations)));
+	}
+
+	private static void RegisterSourceCatalog(IServiceCollection services, ApiKeyOptions options) {
+		var catalog = GetOrAddCatalog(services);
+
+		foreach (var store in options.DynamicStores) {
+			var sourceRef = ApiKeySourceRef.Derive(store.FriendlyName);
+
+			catalog.Register(new ApiKeySource {
+				FriendlyName = store.FriendlyName,
+				SourceRef = sourceRef,
+				Profile = store.Profile,
+				Kind = ApiKeySourceKind.Dynamic,
+			});
+
+			// The store's resolver is addressable by its SourceRef (dispatch wired in P4b).
+			services.AddKeyedSingleton(typeof(IApiKeyClientResolver), sourceRef, store.ResolverType);
+		}
+	}
+
+	private static ApiKeySourceCatalog GetOrAddCatalog(IServiceCollection services) {
+		var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(ApiKeySourceCatalog));
+		if (descriptor?.ImplementationInstance is ApiKeySourceCatalog existing) {
+			return existing;
+		}
+
+		var catalog = new ApiKeySourceCatalog();
+		services.AddSingleton(catalog);
+		services.AddSingleton<IApiKeySourceCatalog>(catalog);
+		return catalog;
 	}
 
 	private static void RegisterDeclaredTransports(
