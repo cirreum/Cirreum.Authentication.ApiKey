@@ -8,11 +8,8 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Inherit from this class to create a custom resolver. You only need to implement:
-/// <list type="bullet">
-///   <item><see cref="SupportedHeaders"/> - which headers your resolver handles</item>
-///   <item><see cref="LookupKeysAsync"/> - your database/external lookup logic</item>
-/// </list>
+/// Inherit from this class to create a custom resolver. You only need to implement
+/// <see cref="LookupKeysAsync"/> — your database/external lookup logic.
 /// </para>
 /// <para>
 /// The base class handles format validation, secure hash comparison, expiration
@@ -31,9 +28,6 @@ using Microsoft.Extensions.Logging;
 ///         : base(validator, logger) {
 ///         _repository = repository;
 ///     }
-///
-///     public override IReadOnlySet&lt;string&gt; SupportedHeaders =&gt;
-///         new HashSet&lt;string&gt; { "X-Api-Key" };
 ///
 ///     protected override Task&lt;IEnumerable&lt;StoredApiKey&gt;&gt; LookupKeysAsync(
 ///         ApiKeyLookupContext context,
@@ -60,9 +54,6 @@ public abstract class DynamicApiKeyClientResolver(
 
 	private readonly IApiKeyValidator _validator = validator ?? throw new ArgumentNullException(nameof(validator));
 	private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-	/// <inheritdoc/>
-	public abstract IReadOnlySet<string> SupportedHeaders { get; }
 
 	/// <summary>
 	/// Looks up stored API keys from the database or external source.

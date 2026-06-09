@@ -17,10 +17,8 @@ internal static class TestResolvers {
 		new() { ClientId = clientId, ClientName = clientId };
 
 	/// <summary>A resolver that returns a fixed result and counts invocations.</summary>
-	public sealed class Stub(ApiKeyResolveResult result, params string[] headers) : IApiKeyClientResolver {
+	public sealed class Stub(ApiKeyResolveResult result) : IApiKeyClientResolver {
 		public int Calls { get; private set; }
-		public IReadOnlySet<string> SupportedHeaders { get; } =
-			(headers.Length > 0 ? headers : ["Authorization"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		public Task<ApiKeyResolveResult> ResolveAsync(
 			string providedKey, ApiKeyLookupContext context, CancellationToken cancellationToken = default) {
@@ -30,10 +28,8 @@ internal static class TestResolvers {
 	}
 
 	/// <summary>A resolver that throws a non-cancellation exception.</summary>
-	public sealed class Throwing(params string[] headers) : IApiKeyClientResolver {
+	public sealed class Throwing : IApiKeyClientResolver {
 		public int Calls { get; private set; }
-		public IReadOnlySet<string> SupportedHeaders { get; } =
-			(headers.Length > 0 ? headers : ["Authorization"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 		public Task<ApiKeyResolveResult> ResolveAsync(
 			string providedKey, ApiKeyLookupContext context, CancellationToken cancellationToken = default) {
@@ -43,10 +39,7 @@ internal static class TestResolvers {
 	}
 
 	/// <summary>A resolver that honors cancellation by throwing when its token is cancelled.</summary>
-	public sealed class CancelObserving(params string[] headers) : IApiKeyClientResolver {
-		public IReadOnlySet<string> SupportedHeaders { get; } =
-			(headers.Length > 0 ? headers : ["Authorization"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+	public sealed class CancelObserving : IApiKeyClientResolver {
 		public Task<ApiKeyResolveResult> ResolveAsync(
 			string providedKey, ApiKeyLookupContext context, CancellationToken cancellationToken = default) {
 			cancellationToken.ThrowIfCancellationRequested();

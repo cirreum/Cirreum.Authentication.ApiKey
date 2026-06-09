@@ -65,16 +65,4 @@ public sealed class ApiKeyClientRegistry {
 		return null;
 	}
 
-	/// <summary>
-	/// Gets all distinct custom-header names that have registered clients accepting
-	/// the <see cref="CredentialTransport.CustomHeader"/> transport. Consumed by
-	/// <see cref="ConfigurationApiKeyClientResolver.SupportedHeaders"/> at runtime so
-	/// resolvers know which custom headers to handle.
-	/// </summary>
-	public IReadOnlySet<string> RegisteredCustomHeaders =>
-		_clients
-			.Where(c => c.AcceptedTransports.HasFlag(CredentialTransport.CustomHeader))
-			.Select(c => c.HeaderName)
-			.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
 }

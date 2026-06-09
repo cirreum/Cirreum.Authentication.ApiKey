@@ -63,9 +63,6 @@ public sealed class CachingApiKeyClientResolver(
 	}
 
 	/// <inheritdoc/>
-	public IReadOnlySet<string> SupportedHeaders => _inner.SupportedHeaders;
-
-	/// <inheritdoc/>
 	public async Task<ApiKeyResolveResult> ResolveAsync(
 		string providedKey,
 		ApiKeyLookupContext context,

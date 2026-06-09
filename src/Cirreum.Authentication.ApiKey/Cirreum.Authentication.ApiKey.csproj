@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<AssemblyName>Cirreum.Authentication.ApiKey</AssemblyName>
 		<RootNamespace>Cirreum.Authentication.ApiKey</RootNamespace>
-		<Description>ApiKey authentication scheme for the Cirreum framework. Successor to Cirreum.Authorization.ApiKey under the Cirreum 1.0 Foundation Reset (Three Security Pillars, Authentication Composition Surface). Provides the ApiKey authentication handler, options, registrar, ISchemeSelector, and client resolver family (configuration / dynamic / caching / composite). Supports both Authorization: Bearer and custom-header credential transports.</Description>
+		<Description>ApiKey authentication scheme for the Cirreum framework. Provides the ApiKey authentication handler, options, registrar, ISchemeSelector, and a source-based client resolver family — static configured keys plus dynamic default / named sources (with optional per-source caching and X-Api-Source routing). Supports both Authorization: Bearer and custom-header credential transports.</Description>
 		<PackageTags>cirreum;authentication;apikey;scheme;framework</PackageTags>
 	</PropertyGroup>
 

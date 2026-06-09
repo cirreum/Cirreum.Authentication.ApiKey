@@ -28,7 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
   - `ApiKeyTransports` + `ApiKeySchemes` constants — the IntelliSense-discoverable transport/scheme names (`ApiKey:Bearer`, `ApiKey:X-Api-Key`, …).
   - `ApiKeyOptions` with three composition modes — bare `AddApiKey()` registers all well-known transports (mode A); `AddTransport(...)` selects an explicit subset (mode B); `AddCustomHeaderTransport(...)` is the non-standard-header escape hatch (mode C).
   - `AddDefaultSource<T>(requireClientId?, caching?)` and `AddNamedSource<T>(name, requireClientId?, caching?)` register dynamic API key sources — the default source is reached without `X-Api-Source`; named sources are addressable-only. The `ApiKeySourceDispatcher` tries configured instances first, then the default source, and routes `X-Api-Source` to named sources — composing them in one engine (no separate composite).
-  - `NullApiKeyClientResolver` — fallback for orphaned transports (a declared transport with no validation source) so they return 401 cleanly; the boot-time auth-posture analyzer flags them.
+  - Orphan transports (a declared transport with no source behind it) resolve to a clean 401 via the dispatcher; the boot-time auth-posture analyzer flags them.
 
 ### Security
 

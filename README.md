@@ -226,9 +226,6 @@ public class DatabaseApiKeyResolver(
 	ILogger<DatabaseApiKeyResolver> logger)
 	: DynamicApiKeyClientResolver(validator, logger) {
 
-	public override IReadOnlySet<string> SupportedHeaders =>
-		new HashSet<string> { ApiKeyTransports.XApiKey };
-
 	protected override async Task<IEnumerable<StoredApiKey>> LookupKeysAsync(
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken) {

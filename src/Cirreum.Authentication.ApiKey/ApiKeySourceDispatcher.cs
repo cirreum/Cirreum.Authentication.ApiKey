@@ -29,20 +29,6 @@ internal sealed class ApiKeySourceDispatcher(
 
 	private readonly bool _hasNamedSources = catalog.Sources.Count > 0;
 
-	private readonly Lazy<IReadOnlySet<string>> _supportedHeaders = new(() => {
-		var headers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		if (configResolver is not null) {
-			headers.UnionWith(configResolver.SupportedHeaders);
-		}
-		if (defaultSource is not null) {
-			headers.UnionWith(defaultSource.Resolver.SupportedHeaders);
-		}
-		return headers;
-	});
-
-	/// <inheritdoc/>
-	public IReadOnlySet<string> SupportedHeaders => this._supportedHeaders.Value;
-
 	/// <inheritdoc/>
 	public async Task<ApiKeyResolveResult> ResolveAsync(
 		string providedKey,

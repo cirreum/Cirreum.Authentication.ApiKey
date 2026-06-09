@@ -244,4 +244,82 @@ public sealed class ApiKeySourceDispatcherTests {
 
 		result.Outcome.Should().Be(ApiKeyResolveOutcome.NotFound);
 	}
+
+	[Fact]
+	public async Task Cancellation_propagates() {
+		using var cts = new CancellationTokenSource();
+		await cts.CancelAsync();
+		var dispatcher = Dispatcher(
+			catalog: CatalogWithNamedSource(requireClientId: false),
+			services: KeyedServices(new TestResolvers.CancelObserving()));
+
+		var act = () => dispatcher.ResolveAsync("k", Context(requestedSource: SourceRef), cts.Token);
+
+		await act.Should().ThrowAsync<OperationCanceledException>();
+	}
+
+	// ---- Composition variations: config-only / named-only / config+named / all three ----
+
+	[Fact]
+	public async Task Config_only_resolves_a_configured_key_and_misses_otherwise() {
+		var dispatcher = Dispatcher(config: ConfigWithKey(StaticKey, "static-1"));
+
+		var hit = await dispatcher.ResolveAsync(StaticKey, Context());
+		hit.IsSuccess.Should().BeTrue();
+		hit.Client!.ClientId.Should().Be("static-1");
+
+		// A different (format-valid) key with no default/named source behind it → a plain 401, not a 400.
+		var miss = await dispatcher.ResolveAsync("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", Context());
+		miss.Outcome.Should().Be(ApiKeyResolveOutcome.NotFound);
+	}
+
+	[Fact]
+	public async Task Named_only_routes_on_X_Api_Source_and_demands_it_otherwise() {
+		var named = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("named-1")));
+		var dispatcher = Dispatcher(
+			catalog: CatalogWithNamedSource(requireClientId: false),
+			services: KeyedServices(named));
+
+		var routed = await dispatcher.ResolveAsync("k", Context(requestedSource: SourceRef));
+		routed.Client!.ClientId.Should().Be("named-1");
+
+		// No address, named sources exist, Bearer → must address one (400), never blind-scan.
+		var unaddressed = await dispatcher.ResolveAsync("k", Context());
+		unaddressed.Outcome.Should().Be(ApiKeyResolveOutcome.MissingRoutingSignal);
+	}
+
+	[Fact]
+	public async Task Config_plus_named_serves_config_unaddressed_and_named_when_addressed() {
+		var named = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("named-1")));
+		var dispatcher = Dispatcher(
+			config: ConfigWithKey(StaticKey, "static-1"),
+			catalog: CatalogWithNamedSource(requireClientId: false),
+			services: KeyedServices(named));
+
+		var viaConfig = await dispatcher.ResolveAsync(StaticKey, Context());
+		viaConfig.Client!.ClientId.Should().Be("static-1");
+
+		var viaNamed = await dispatcher.ResolveAsync("k", Context(requestedSource: SourceRef));
+		viaNamed.Client!.ClientId.Should().Be("named-1");
+	}
+
+	[Fact]
+	public async Task All_three_sources_compose_with_the_right_precedence() {
+		var named = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("named-1")));
+		var dispatcher = Dispatcher(
+			config: ConfigWithKey(StaticKey, "static-1"),
+			defaultSource: new ApiKeyDefaultSource(
+				new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("default-1"))), RequireClientId: false),
+			catalog: CatalogWithNamedSource(requireClientId: false),
+			services: KeyedServices(named));
+
+		// Configured static key, no address → config wins.
+		(await dispatcher.ResolveAsync(StaticKey, Context())).Client!.ClientId.Should().Be("static-1");
+
+		// Non-static key, no address → falls through to the default source.
+		(await dispatcher.ResolveAsync("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", Context())).Client!.ClientId.Should().Be("default-1");
+
+		// Addressed → the named source, authoritatively (config + default not consulted).
+		(await dispatcher.ResolveAsync("k", Context(requestedSource: SourceRef))).Client!.ClientId.Should().Be("named-1");
+	}
 }

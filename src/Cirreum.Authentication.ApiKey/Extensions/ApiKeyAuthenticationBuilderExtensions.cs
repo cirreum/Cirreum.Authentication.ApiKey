@@ -46,8 +46,8 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 	///   <item>Statically configured instances → the configuration-backed resolver (tried first).</item>
 	///   <item>A default dynamic source → the no-<c>X-Api-Source</c> fallback.</item>
 	///   <item>Named dynamic sources → reached only via an explicit <c>X-Api-Source</c> reference.</item>
-	///   <item>None → a no-op resolver so orphaned schemes return 401 cleanly; the
-	///   boot-time auth-posture analyzer flags the orphan transports.</item>
+	///   <item>None → the dispatcher returns 401 for every request (an orphan transport); the
+	///   boot-time auth-posture analyzer flags it.</item>
 	/// </list>
 	/// </remarks>
 	public static IAuthenticationBuilder AddApiKey(

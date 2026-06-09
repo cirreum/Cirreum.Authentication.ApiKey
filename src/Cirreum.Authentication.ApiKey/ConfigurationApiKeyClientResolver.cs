@@ -19,9 +19,6 @@ public sealed class ConfigurationApiKeyClientResolver(
 	private readonly ILogger<ConfigurationApiKeyClientResolver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
 	/// <inheritdoc/>
-	public IReadOnlySet<string> SupportedHeaders => _registry.RegisteredCustomHeaders;
-
-	/// <inheritdoc/>
 	public Task<ApiKeyResolveResult> ResolveAsync(
 		string providedKey,
 		ApiKeyLookupContext context,
