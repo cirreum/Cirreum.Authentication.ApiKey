@@ -36,8 +36,12 @@ public sealed class ApiKeyOptions {
 	private readonly List<ApiKeyDynamicStoreRegistration> _dynamicStores = [];
 
 	/// <summary>
-	/// Adds a well-known transport (a value from <see cref="ApiKeyTransports"/>). Opts the
-	/// provider out of the all-well-known default — only explicitly added transports register.
+	/// Adds a well-known transport (a value from <see cref="ApiKeyTransports"/>). This is a
+	/// <b>restriction, not an addition</b>: the first call opts the provider out of the all-well-known
+	/// default, so from then on <b>only</b> the transports you explicitly add are registered — narrowing
+	/// what the whole provider accepts across every store and client. Omit it entirely (the default) to
+	/// keep all well-known transports open; to keep them <em>and</em> add a custom one, list them all
+	/// explicitly plus <see cref="AddCustomHeaderTransport"/>.
 	/// </summary>
 	/// <param name="transport">The transport — <see cref="ApiKeyTransports.Bearer"/> registers
 	/// the <c>ApiKey:Bearer</c> scheme; any other value is treated as a header name and

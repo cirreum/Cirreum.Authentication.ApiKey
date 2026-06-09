@@ -8,8 +8,6 @@
 
 **API key authentication scheme for the Cirreum framework**
 
-> **Migrating from `Cirreum.Authorization.ApiKey`?** This package is its renamed successor — same scheme, proper layer. See [`docs/MIGRATION-v1.md`](docs/MIGRATION-v1.md).
-
 ## Overview
 
 **Cirreum.Authentication.ApiKey** provides header- and Bearer-based API key authentication for ASP.NET Core applications within the Cirreum ecosystem. It enables secure service-to-service communication and broker authentication scenarios where OAuth/OIDC flows are not appropriate.
@@ -49,32 +47,32 @@ Add API key clients to your `appsettings.json`:
 ```json
 {
   "Cirreum": {
-    "Authentication": {
-      "Providers": {
-        "ApiKey": {
-          "BearerPrefix": "ak_prod_",
-          "Instances": {
-            "TrackBroker": {
-              "Enabled": true,
-              "ClientId": "track-broker",
-              "ClientName": "Track Broker Application",
-              "Key": "ak_prod_a1b2c3d4e5f6...",
-              "AcceptedTransports": "BearerAuthorizationHeader",
-              "Roles": ["App.System"]
-            },
-            "ExternalService": {
-              "Enabled": true,
-              "ClientId": "external-service",
-              "ClientName": "External Integration Service",
-              "Key": "x1y2z3w4v5u6...",
-              "AcceptedTransports": "CustomHeader",
-              "HeaderName": "X-Api-Key",
-              "Roles": ["App.Agent"]
-            }
-          }
-        }
-      }
-    }
+	"Authentication": {
+	  "Providers": {
+		"ApiKey": {
+		  "BearerPrefix": "ak_prod_",
+		  "Instances": {
+			"TrackBroker": {
+			  "Enabled": true,
+			  "ClientId": "track-broker",
+			  "ClientName": "Track Broker Application",
+			  "Key": "ak_prod_a1b2c3d4e5f6...", // shown for example only - store in secrets.json or Key Vault
+			  "AcceptedTransports": "BearerAuthorizationHeader",
+			  "Roles": ["App.System"]
+			},
+			"ExternalService": {
+			  "Enabled": true,
+			  "ClientId": "external-service",
+			  "ClientName": "External Integration Service",
+			  "Key": "x1y2z3w4v5u6...", // shown for example only - store in secrets.json or Key Vault
+			  "AcceptedTransports": "CustomHeader",
+			  "HeaderName": "X-Api-Key",
+			  "Roles": ["App.Agent"]
+			}
+		  }
+		}
+	  }
+	}
   }
 }
 ```
@@ -101,7 +99,7 @@ A client whose `AcceptedTransports` includes both flags is reachable via the `Ap
 
 ## Two forms of keys
 
-ApiKey supports two distinct forms, each with its own strength model (ADR-0020 §2/§3):
+ApiKey supports two distinct forms, each with its own strength model:
 
 ### Form 1 — statically configured keys
 
@@ -110,9 +108,19 @@ Keys declared in `appsettings` / Key Vault and bound by the registrar (the `Inst
 To run weak demo / prototype keys, set the negative-worded, off-by-default escape hatch:
 
 ```json
-{ "Cirreum": { "Authentication": { "Providers": { "ApiKey": {
-  "Validation": { "AllowWeakConfiguredKeys": true }
-}}}}}
+{ 
+	"Cirreum": { 
+		"Authentication": { 
+			"Providers": { 
+				"ApiKey": {
+					"Validation": { 
+						"AllowWeakConfiguredKeys": true 
+					}
+				}
+			}
+		}
+	}
+}
 ```
 
 > ⚠ `AllowWeakConfiguredKeys` is for non-production use only. Configured secrets leak (logs, source control, config dumps) and weak keys are guessable.
@@ -121,7 +129,7 @@ To run weak demo / prototype keys, set the negative-worded, off-by-default escap
 
 ### Form 2 — dynamic managed keys
 
-Keys minted and stored by the application through a dynamic store (`AddDynamicStore<TResolver>(name)` / `AddResolver<TResolver>()`). These are strong by construction: generate them with `IApiKeyGenerator` (256-bit CSPRNG, URL-safe) and persist only a self-describing hash via `IApiKeyValidator.HashKeyEncoded(...)`.
+Keys minted and stored by the application through a dynamic store — `AddDynamicStore<TResolver>(name)` for an addressable, multi-store managed key set (the recommended path; reached by `X-Api-Source`), or the legacy single-store `AddResolver<TResolver>()` (the cheap blind-scan path). These are strong by construction: generate them with `IApiKeyGenerator` (256-bit CSPRNG, URL-safe) and persist only a self-describing hash via `IApiKeyValidator.HashKeyEncoded(...)`.
 
 ```csharp
 // Generate a 256-bit secret (raw portion); prefix with ak_{env}_ if you use BearerPrefix.
@@ -149,15 +157,38 @@ When `BearerPrefix` is configured, the Bearer selector matches only tokens start
 
 When `BearerPrefix` is unset, the Bearer selector falls back to JWT-shape disambiguation: it claims any non-JWT-shaped Bearer value and leaves JWT-shaped values for the framework's audience-routing selector.
 
+### Declaring transports — and when *not* to
+
+By default — `AddApiKey()` with **no** `AddTransport(...)` / `AddCustomHeaderTransport(...)` call — the provider registers **all** well-known transports: `Authorization: Bearer`, `X-Api-Key`, `Ocp-Apim-Subscription-Key`, and `X-Auth-Token`. **This is the recommended default.** It leaves every transport open, so dynamic stores and individual customers/clients can each use whichever transport suits them, and a new customer integration needs no recompile.
+
+> ⚠ **`AddTransport(...)` is a *restriction*, not an addition.** The first call to `AddTransport(...)` or `AddCustomHeaderTransport(...)` opts the provider **out** of the well-known default — from that point **only** the transports you explicitly list are registered. So:
+>
+> ```csharp
+> auth.AddApiKey(o => o.AddTransport(ApiKeyTransports.XApiKey));
+> ```
+>
+> accepts **`X-Api-Key` only** — Bearer and the other well-known transports are dropped, for **every** store and **every** client. Calling `AddTransport` narrows what the whole provider will accept, which directly limits the transports you can offer your customers/clients across all key sets. Use it **only** when you deliberately intend to restrict the provider to a specific transport form.
+
+To accept the well-known set **plus** a custom header, list them all explicitly — once you declare anything, nothing is implied:
+
+```csharp
+auth.AddApiKey(o => o
+    .AddTransport(ApiKeyTransports.Bearer)
+    .AddTransport(ApiKeyTransports.XApiKey)
+    .AddTransport(ApiKeyTransports.OcpApimSubscriptionKey)
+    .AddTransport(ApiKeyTransports.XAuthToken)
+    .AddCustomHeaderTransport("X-Partner-Key"));
+```
+
 ## Architecture
 
 ```text
 ApiKeyAuthenticationRegistrar
 └── extends HeaderAuthenticationProviderRegistrar  (Cirreum.AuthenticationProvider)
-    ├── per-instance: validate, resolve key, register client in ApiKeyClientRegistry
-    └── post-loop: register one ASP.NET scheme + selector per (transport, header) tuple
-        ├── ApiKey:Bearer       → ApiKeyAuthenticationHandler + ApiKeyBearerSchemeSelector (IBearerSchemeSelector)
-        └── ApiKey:{Header}     → ApiKeyAuthenticationHandler + ApiKeyHeaderSchemeSelector  (one per distinct header)
+	├── per-instance: validate, resolve key, register client in ApiKeyClientRegistry
+	└── post-loop: register one ASP.NET scheme + selector per (transport, header) tuple
+		├── ApiKey:Bearer       → ApiKeyAuthenticationHandler + ApiKeyBearerSchemeSelector (IBearerSchemeSelector)
+		└── ApiKey:{Header}     → ApiKeyAuthenticationHandler + ApiKeyHeaderSchemeSelector  (one per distinct header)
 
 ApiKeyAuthenticationHandler  (AuthenticationHandler<ApiKeyAuthenticationOptions>)
 ├── reads ONE source per scheme — options.Transport selects Bearer or CustomHeader
@@ -180,38 +211,40 @@ For large-scale deployments with many partners/customers, implement database-bac
 
 ```csharp
 builder.AddAuthentication(auth => auth
-    .AddApiKey(o => o
-        .AddTransport(ApiKeyTransports.XApiKey)
-        .AddResolver<DatabaseApiKeyResolver>()));
+	.AddApiKey(o => o
+		.AddTransport(ApiKeyTransports.XApiKey) // restricts to X-Api-Key only — see "Declaring transports"
+		.AddResolver<DatabaseApiKeyResolver>()));
 ```
+
+> The `AddTransport(...)` above restricts the provider to **`X-Api-Key` only**. Drop it to keep all well-known transports open (the resolver's `SupportedHeaders` still scopes which headers it answers). See [Declaring transports — and when *not* to](#declaring-transports--and-when-not-to).
 
 ### Implementing a custom resolver
 
 ```csharp
 public class DatabaseApiKeyResolver(
-    IApiKeyValidator validator,
-    IDbConnection db,
-    ILogger<DatabaseApiKeyResolver> logger)
-    : DynamicApiKeyClientResolver(validator, logger) {
+	IApiKeyValidator validator,
+	IDbConnection db,
+	ILogger<DatabaseApiKeyResolver> logger)
+	: DynamicApiKeyClientResolver(validator, logger) {
 
-    public override IReadOnlySet<string> SupportedHeaders =>
-        new HashSet<string> { ApiKeyTransports.XApiKey };
+	public override IReadOnlySet<string> SupportedHeaders =>
+		new HashSet<string> { ApiKeyTransports.XApiKey };
 
-    protected override async Task<IEnumerable<StoredApiKey>> LookupKeysAsync(
-        ApiKeyLookupContext context,
-        CancellationToken cancellationToken) {
+	protected override async Task<IEnumerable<StoredApiKey>> LookupKeysAsync(
+		ApiKeyLookupContext context,
+		CancellationToken cancellationToken) {
 
-        var clientId = context.GetHeader("X-Client-Id");
-        if (!string.IsNullOrEmpty(clientId)) {
-            return await db.QueryAsync<StoredApiKey>(
-                "SELECT * FROM ApiKeys WHERE ClientId = @ClientId AND IsActive = 1",
-                new { ClientId = clientId });
-        }
+		var clientId = context.GetHeader("X-Client-Id");
+		if (!string.IsNullOrEmpty(clientId)) {
+			return await db.QueryAsync<StoredApiKey>(
+				"SELECT * FROM ApiKeys WHERE ClientId = @ClientId AND IsActive = 1",
+				new { ClientId = clientId });
+		}
 
-        return await db.QueryAsync<StoredApiKey>(
-            "SELECT * FROM ApiKeys WHERE HeaderName = @HeaderName AND IsActive = 1",
-            new { HeaderName = context.HeaderName });
-    }
+		return await db.QueryAsync<StoredApiKey>(
+			"SELECT * FROM ApiKeys WHERE HeaderName = @HeaderName AND IsActive = 1",
+			new { HeaderName = context.HeaderName });
+	}
 }
 ```
 
@@ -219,33 +252,43 @@ public class DatabaseApiKeyResolver(
 
 ```csharp
 builder.AddAuthentication(auth => auth
-    .AddApiKey(o => o
-        .AddTransport(ApiKeyTransports.XApiKey)
-        .AddResolver<DatabaseApiKeyResolver>(caching => {
-            caching.SuccessCacheDuration = TimeSpan.FromMinutes(5);
-            // Negative (miss) caching is OFF by default — enabling it can reject a
-            // newly provisioned or just-rotated key for up to NotFoundCacheDuration.
-            caching.EnableNegativeCaching = true;
-            caching.NotFoundCacheDuration = TimeSpan.FromSeconds(30);
-        })));
+	.AddApiKey(o => o
+		.AddTransport(ApiKeyTransports.XApiKey)
+		.AddResolver<DatabaseApiKeyResolver>(caching => {
+			caching.SuccessCacheDuration = TimeSpan.FromMinutes(5);
+			// Negative (miss) caching is OFF by default — enabling it can reject a
+			// newly provisioned or just-rotated key for up to NotFoundCacheDuration.
+			caching.EnableNegativeCaching = true;
+			caching.NotFoundCacheDuration = TimeSpan.FromSeconds(30);
+		})));
 ```
 
 Cache entries are keyed by the routing dimension (`X-Api-Source`) together with the header and a hash of the key, so a result cached for one store never satisfies a lookup for another.
 
 ## Multi-store routing
 
-A single ApiKey provider can front several key sets. A *configured* (static) set is cheap and participates in the blind fallback scan; a *dynamic* set registered with `AddDynamicStore<TResolver>(name)` is **addressable-only** — reached solely by an explicit `X-Api-Source` header carrying the store's opaque reference, and never blind-scanned (the CPU-DoS guarantee, ADR-0020 §5/§6). When addressable stores exist and a Bearer credential arrives with no `X-Api-Source`, the handler returns a non-descript **`400`** (missing routing signal) — it never enumerates valid sources nor scans expensive stores.
+A single ApiKey provider can front several key sets. A *configured* (static) set is cheap and participates in the blind fallback scan; a *dynamic* set registered with `AddDynamicStore<TResolver>(name)` is **addressable-only** — reached solely by an explicit `X-Api-Source` header carrying the store's opaque reference, and never blind-scanned (the CPU-DoS guarantee). When addressable stores exist and a Bearer credential arrives with no `X-Api-Source`, the handler returns a non-descript **`400`** (missing routing signal) — it never enumerates valid sources nor scans expensive stores.
 
 ## Revocation
 
-A per-request denylist (`IApiKeyDenylist`) is consulted on every resolution **after** the cache, so a revoked credential is rejected even within a cache entry's TTL (ADR-0020 §8). It is hydrated at boot from any registered `IRevokedCredentialProvider` and kept current by `CredentialRevoked` auth-bus events.
+A per-request denylist (`IApiKeyDenylist`) is consulted on every resolution **after** the cache, so a revoked credential is rejected even within a cache entry's TTL. It is hydrated at boot from any registered `IRevokedCredentialProvider` and kept current by `CredentialRevoked` auth-bus events.
 
 The hydrator is **fail-closed**: if a provider faults at startup (the denylist may be missing revoked credentials), ApiKey authentication fails closed with a retryable **`503`**, a `Critical` log is emitted, and the `apikey-revocation` health check reports `Unhealthy` — until hydration succeeds. To deliberately serve with a possibly-incomplete denylist (availability over the revocation guarantee), set the off-by-default escape hatch:
 
 ```json
-{ "Cirreum": { "Authentication": { "Providers": { "ApiKey": {
-  "Revocation": { "AllowFaultedDenylist": true }
-}}}}}
+{ 
+	"Cirreum": { 
+		"Authentication": {
+			"Providers": {
+				"ApiKey": {
+					"Revocation": {
+						"AllowFaultedDenylist": true 
+					}
+				}
+			}
+		}
+	}
+}
 ```
 
 > ⚠ With `AllowFaultedDenylist` set, a revoked credential may authenticate until the live revocation event stream catches up; the health check stays `Degraded`.
@@ -269,7 +312,7 @@ The in-memory denylist is bounded by `Revocation:MaxDenylistEntries` (default 1,
 Authenticated requests receive the following claims:
 
 | Claim | Value |
-|---|---|
+| --- | --- |
 | `ClaimTypes.NameIdentifier` | `ClientId` |
 | `ClaimTypes.Name` | `ClientName` |
 | `ClaimTypes.Role` | Each configured role |
@@ -286,5 +329,5 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Cirreum Foundation Framework**
+**Cirreum Foundation Framework**  
 *Layered simplicity for modern .NET*
