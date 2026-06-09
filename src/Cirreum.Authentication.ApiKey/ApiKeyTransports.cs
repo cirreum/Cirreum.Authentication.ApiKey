@@ -1,22 +1,13 @@
 namespace Cirreum.Authentication;
 
 /// <summary>
-/// Well-known HTTP transports (header names) that carry an API key credential. App authors
-/// pick from these at composition sites (<c>AddApiKey(opt =&gt; opt.AddTransport(...))</c>) and
-/// when authoring custom-header registrations. The constant <em>values</em> are the literal
-/// HTTP header names (for <c>Bearer</c>, the value is the <c>Authorization: Bearer</c> scheme
-/// token).
+/// The literal HTTP header names for the well-known API key transports (for <c>Bearer</c>, the
+/// <c>Authorization: Bearer</c> scheme token). Internal: the app-facing surface is the
+/// <see cref="ApiKeyTransport"/> enum (for <see cref="ApiKeyOptions.AcceptTransports"/>) and the
+/// <see cref="ApiKeySchemes"/> constants (for <c>[Authorize(AuthenticationSchemes = ...)]</c>). These
+/// strings back both — the ASP.NET scheme name for a transport is <c>"ApiKey:" + transport</c>.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Each protocol package owns its own <c>Transports</c> + <c>Schemes</c>
-/// constants. The ASP.NET scheme name for a transport is <c>"ApiKey:" + transport</c> — see
-/// <see cref="ApiKeySchemes"/>. New customer integrations that use a non-standard header use
-/// the custom-header escape hatch rather than extending this set ad hoc; genuinely common new
-/// transports are promoted into this class in a future version.
-/// </para>
-/// </remarks>
-public static class ApiKeyTransports {
+internal static class ApiKeyTransports {
 
 	/// <summary>
 	/// The <c>Authorization: Bearer &lt;token&gt;</c> transport — an opaque (non-JWT) API key

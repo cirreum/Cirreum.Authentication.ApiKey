@@ -19,13 +19,6 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public static class ApiKeyAuthenticationBuilderExtensions {
 
-	private static readonly string[] WellKnownTransports = [
-		ApiKeyTransports.Bearer,
-		ApiKeyTransports.XApiKey,
-		ApiKeyTransports.OcpApimSubscriptionKey,
-		ApiKeyTransports.XAuthToken,
-	];
-
 	/// <summary>
 	/// Composes the ApiKey authentication provider. Binds configured instances from
 	/// <c>Cirreum:Authentication:Providers:ApiKey</c>, registers the declared transport
@@ -33,10 +26,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 	/// </summary>
 	/// <param name="builder">The Cirreum authentication builder.</param>
 	/// <param name="configure">Optional options callback selecting transports
-	/// (<see cref="ApiKeyOptions.AddTransport"/> / <see cref="ApiKeyOptions.AddCustomHeaderTransport"/>)
+	/// (<see cref="ApiKeyOptions.AcceptTransports"/> / <see cref="ApiKeyOptions.AddCustomTransport"/>)
 	/// and/or dynamic sources (<see cref="ApiKeyOptions.AddDefaultSource{T}"/> /
-	/// <see cref="ApiKeyOptions.AddNamedSource{T}"/>). When omitted (or with no transport declared), all
-	/// well-known transports register.</param>
+	/// <see cref="ApiKeyOptions.AddNamedSource{T}"/>). When omitted (or with no <c>AcceptTransports</c>
+	/// call), all well-known transports register.</param>
 	/// <returns>The builder for chaining.</returns>
 	/// <remarks>
 	/// <para>
@@ -69,7 +62,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// 1. Bind + register configured instances (appsettings). The registrar stashes
 		//    BearerPrefix, registers ConfigurationApiKeyClientResolver as a concrete type,
 		//    populates the client registry, and registers the schemes the instances use.
-		var providerSettings = BindConfiguredInstances(builder);
+		BindConfiguredInstances(builder);
 
 		// 1b. Bind the validation knobs (the two-forms strength + hashing options) and register the crypto
 		//     primitives (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
@@ -92,11 +85,11 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		return builder;
 	}
 
-	private static ApiKeyAuthenticationSettings? BindConfiguredInstances(IAuthenticationBuilder builder) {
+	private static void BindConfiguredInstances(IAuthenticationBuilder builder) {
 
 		var section = builder.Configuration.GetSection("Cirreum:Authentication:Providers:ApiKey");
 		if (!section.Exists()) {
-			return null;
+			return;
 		}
 
 		var providerSettings = section.Get<ApiKeyAuthenticationSettings>()
@@ -109,7 +102,6 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			builder.Configuration,
 			builder.AuthBuilder);
 
-		return providerSettings;
 	}
 
 	private static void RegisterValidationServices(
@@ -197,15 +189,15 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		IServiceCollection services,
 		Microsoft.AspNetCore.Authentication.AuthenticationBuilder authBuilder) {
 
-		var transports = options.HasExplicitTransports
-			? options.Transports
-			: WellKnownTransports;
-
-		foreach (var transport in transports) {
-			if (string.Equals(transport, ApiKeyTransports.Bearer, StringComparison.OrdinalIgnoreCase)) {
+		// AcceptedTransports is already resolved (all well-known by default, the restricted subset, or none);
+		// custom headers are layered on top, additively. Bearer takes the Bearer path, every other
+		// transport is a custom-header scheme. Registration is idempotent (TryClaimScheme), so overlaps
+		// between a well-known transport and a same-named custom header collapse to one scheme.
+		foreach (var transport in options.AcceptedTransports) {
+			if (transport == ApiKeyTransport.Bearer) {
 				ApiKeySchemeRegistration.TryRegisterBearer(services, authBuilder);
 			} else {
-				ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, transport);
+				ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, transport.HeaderName());
 			}
 		}
 

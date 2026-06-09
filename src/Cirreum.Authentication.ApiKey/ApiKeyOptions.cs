@@ -9,18 +9,16 @@ using Cirreum.Authentication.ApiKey;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Transports — three composition modes:
+/// Transports — which header (or Bearer scheme) carries the key:
 /// </para>
 /// <list type="bullet">
-///   <item><b>Mode A (default):</b> no <c>AddTransport</c> / <c>AddCustomHeaderTransport</c>
-///   calls — all well-known transports are registered (<see cref="ApiKeyTransports.Bearer"/>,
-///   <see cref="ApiKeyTransports.XApiKey"/>, <see cref="ApiKeyTransports.OcpApimSubscriptionKey"/>,
-///   <see cref="ApiKeyTransports.XAuthToken"/>). Future-proof against new customer
-///   integrations without a recompile.</item>
-///   <item><b>Mode B:</b> one or more <see cref="AddTransport"/> calls — only the named
-///   transports are registered (restriction discipline).</item>
-///   <item><b>Mode C:</b> one or more <see cref="AddCustomHeaderTransport"/> calls — a
-///   non-standard header escape hatch.</item>
+///   <item><b>Default:</b> no <see cref="AcceptTransports"/> call — all well-known
+///   <see cref="ApiKeyTransport"/> values are accepted (<c>Bearer</c>, <c>X-Api-Key</c>,
+///   <c>Ocp-Apim-Subscription-Key</c>, <c>X-Auth-Token</c>).</item>
+///   <item><b>Restrict:</b> <see cref="AcceptTransports"/> accepts only the listed well-known
+///   transports; called with no arguments it clears them all.</item>
+///   <item><b>Add custom:</b> <see cref="AddCustomTransport"/> additively accepts a non-standard
+///   header, on top of whatever well-known set is active.</item>
 /// </list>
 /// <para>
 /// Sources — keys come from one of three places, tried in this precedence when no source is addressed:
@@ -33,38 +31,43 @@ using Cirreum.Authentication.ApiKey;
 /// </remarks>
 public sealed class ApiKeyOptions {
 
-	private readonly List<string> _transports = [];
+	private static readonly ApiKeyTransport[] AllWellKnownTransports = Enum.GetValues<ApiKeyTransport>();
+
+	private readonly List<ApiKeyTransport> _acceptedTransports = [];
 	private readonly List<string> _customHeaders = [];
 	private readonly List<ApiKeyNamedSourceRegistration> _namedSources = [];
+	private bool _transportsRestricted;
 
 	/// <summary>
-	/// Adds a well-known transport (a value from <see cref="ApiKeyTransports"/>). This is a
-	/// <b>restriction, not an addition</b>: the first call opts the provider out of the all-well-known
-	/// default, so from then on <b>only</b> the transports you explicitly add are registered — narrowing
-	/// what the whole provider accepts across every source and client. Omit it entirely (the default) to
-	/// keep all well-known transports open; to keep them <em>and</em> add a custom one, list them all
-	/// explicitly plus <see cref="AddCustomHeaderTransport"/>.
+	/// Restricts the provider to a subset of the well-known transports (<see cref="ApiKeyTransport"/>).
+	/// <b>Not required</b> — omit it entirely and all well-known transports are accepted. Calling it (even
+	/// with an empty array) opts out of that default and registers <b>only</b> the transports you list,
+	/// so <c>AcceptTransports()</c> with no arguments <b>clears</b> the well-known set (accept none of
+	/// them — typically paired with <see cref="AddCustomTransport"/> to accept only a non-standard header).
+	/// Custom headers added via <see cref="AddCustomTransport"/> are unaffected — they are always accepted.
 	/// </summary>
-	/// <param name="transport">The transport — <see cref="ApiKeyTransports.Bearer"/> registers
-	/// the <c>ApiKey:Bearer</c> scheme; any other value is treated as a header name and
-	/// registers an <c>ApiKey:{header}</c> scheme.</param>
+	/// <param name="transports">The well-known transports to accept; empty clears the default set.</param>
 	/// <returns>This options instance for chaining.</returns>
-	public ApiKeyOptions AddTransport(string transport) {
-		ArgumentException.ThrowIfNullOrWhiteSpace(transport);
-		if (!_transports.Contains(transport, StringComparer.OrdinalIgnoreCase)) {
-			_transports.Add(transport);
+	public ApiKeyOptions AcceptTransports(params ApiKeyTransport[] transports) {
+		ArgumentNullException.ThrowIfNull(transports);
+		this._transportsRestricted = true;
+		foreach (var transport in transports) {
+			if (!_acceptedTransports.Contains(transport)) {
+				_acceptedTransports.Add(transport);
+			}
 		}
 		return this;
 	}
 
 	/// <summary>
-	/// Adds a custom (non-standard) header transport. Opts the provider out of the
-	/// all-well-known default. Use for partner- or customer-mandated headers that are
-	/// not in <see cref="ApiKeyTransports"/>.
+	/// Additively accepts a custom (non-standard) header transport — registered <b>on top of</b> whatever
+	/// well-known set is active (the all-well-known default, or the subset from <see cref="AcceptTransports"/>).
+	/// It never restricts the well-known transports. Use for partner- or customer-mandated headers that are
+	/// not among the well-known <see cref="ApiKeyTransport"/> values (e.g. <c>X-Partner-ApiKey</c>).
 	/// </summary>
 	/// <param name="headerName">The HTTP header carrying the API key (e.g. <c>X-Partner-ApiKey</c>).</param>
 	/// <returns>This options instance for chaining.</returns>
-	public ApiKeyOptions AddCustomHeaderTransport(string headerName) {
+	public ApiKeyOptions AddCustomTransport(string headerName) {
 		ArgumentException.ThrowIfNullOrWhiteSpace(headerName);
 		if (!_customHeaders.Contains(headerName, StringComparer.OrdinalIgnoreCase)) {
 			_customHeaders.Add(headerName);
@@ -137,20 +140,27 @@ public sealed class ApiKeyOptions {
 		return this;
 	}
 
-	/// <summary>True when the app declared any transport explicitly (modes B/C); false
-	/// selects the all-well-known default (mode A).</summary>
-	internal bool HasExplicitTransports => _transports.Count > 0 || _customHeaders.Count > 0;
+	/// <summary>
+	/// The resolved set of well-known transports the provider accepts: all of them by default, the
+	/// <see cref="AcceptTransports"/> subset once restricted, or none after a clearing
+	/// <c>AcceptTransports()</c> call. Custom headers (<see cref="CustomHeaders"/>) are additive on top.
+	/// </summary>
+	internal IReadOnlyList<ApiKeyTransport> AcceptedTransports =>
+		_transportsRestricted ? _acceptedTransports : AllWellKnownTransports;
 
-	/// <summary>Explicitly-added well-known transports (empty unless mode B was used).</summary>
-	internal IReadOnlyList<string> Transports => _transports;
-
-	/// <summary>Explicitly-added custom header transports (empty unless mode C was used).</summary>
+	/// <summary>
+	/// Custom header transports added via <see cref="AddCustomTransport"/> — always accepted, additively.
+	/// </summary>
 	internal IReadOnlyList<string> CustomHeaders => _customHeaders;
 
-	/// <summary>The default dynamic source, or <see langword="null"/> when none was registered.</summary>
+	/// <summary>
+	/// The default dynamic source, or <see langword="null"/> when none was registered.
+	/// </summary>
 	internal ApiKeyDefaultSourceRegistration? DefaultSource { get; private set; }
 
-	/// <summary>The named dynamic sources declared via <see cref="AddNamedSource{TResolver}"/>.</summary>
+	/// <summary>
+	/// The named dynamic sources declared via <see cref="AddNamedSource{TResolver}"/>.
+	/// </summary>
 	internal IReadOnlyList<ApiKeyNamedSourceRegistration> NamedSources => this._namedSources;
 
 }

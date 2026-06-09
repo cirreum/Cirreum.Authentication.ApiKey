@@ -157,27 +157,29 @@ When `BearerPrefix` is configured, the Bearer selector matches only tokens start
 
 When `BearerPrefix` is unset, the Bearer selector falls back to JWT-shape disambiguation: it claims any non-JWT-shaped Bearer value and leaves JWT-shaped values for the framework's audience-routing selector.
 
-### Declaring transports — and when *not* to
+### Declaring transports
 
-By default — `AddApiKey()` with **no** `AddTransport(...)` / `AddCustomHeaderTransport(...)` call — the provider registers **all** well-known transports: `Authorization: Bearer`, `X-Api-Key`, `Ocp-Apim-Subscription-Key`, and `X-Auth-Token`. **This is the recommended default.** It leaves every transport open, so dynamic stores and individual customers/clients can each use whichever transport suits them, and a new customer integration needs no recompile.
+By default — `AddApiKey()` with **no** `AcceptTransports(...)` call — the provider accepts **all** well-known transports (the `ApiKeyTransport` enum): `Authorization: Bearer`, `X-Api-Key`, `Ocp-Apim-Subscription-Key`, and `X-Auth-Token`. **This is the recommended default** — every transport stays open, so dynamic sources and individual customers/clients can each use whichever suits them, with no recompile for a new integration.
 
-> ⚠ **`AddTransport(...)` is a *restriction*, not an addition.** The first call to `AddTransport(...)` or `AddCustomHeaderTransport(...)` opts the provider **out** of the well-known default — from that point **only** the transports you explicitly list are registered. So:
->
-> ```csharp
-> auth.AddApiKey(o => o.AddTransport(ApiKeyTransports.XApiKey));
-> ```
->
-> accepts **`X-Api-Key` only** — Bearer and the other well-known transports are dropped, for **every** store and **every** client. Calling `AddTransport` narrows what the whole provider will accept, which directly limits the transports you can offer your customers/clients across all key sets. Use it **only** when you deliberately intend to restrict the provider to a specific transport form.
+Two knobs adjust it:
 
-To accept the well-known set **plus** a custom header, list them all explicitly — once you declare anything, nothing is implied:
+- **`AcceptTransports(...)` — restrict.** Accept only the listed well-known transports. *Not required;* call it only to narrow the default. Called with **no arguments** it clears them all (accept none of the well-known set).
+- **`AddCustomTransport(headerName)` — add.** Additively accept a non-standard header, layered on top of whatever well-known set is active. It never removes a well-known transport.
 
 ```csharp
+// Restrict to X-Api-Key only:
+auth.AddApiKey(o => o.AcceptTransports(ApiKeyTransport.XApiKey));
+
+// Keep ALL well-known transports AND also accept a partner header (additive — no list needed):
+auth.AddApiKey(o => o.AddCustomTransport("X-Partner-Key"));
+
+// Accept ONLY a custom header (clear the well-known set, then add):
+auth.AddApiKey(o => o.AcceptTransports().AddCustomTransport("X-Partner-Key"));
+
+// Bearer + X-Api-Key + a partner header:
 auth.AddApiKey(o => o
-	.AddTransport(ApiKeyTransports.Bearer)
-	.AddTransport(ApiKeyTransports.XApiKey)
-	.AddTransport(ApiKeyTransports.OcpApimSubscriptionKey)
-	.AddTransport(ApiKeyTransports.XAuthToken)
-	.AddCustomHeaderTransport("X-Partner-Key"));
+	.AcceptTransports(ApiKeyTransport.Bearer, ApiKeyTransport.XApiKey)
+	.AddCustomTransport("X-Partner-Key"));
 ```
 
 ## Architecture
