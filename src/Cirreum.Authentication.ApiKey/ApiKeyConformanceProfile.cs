@@ -16,16 +16,17 @@ public enum ApiKeyConformanceProfile {
 
 	/// <summary>
 	/// NIST SP 800-63B-conformant with failed-attempt throttling delegated to an attested platform
-	/// edge (gateway / ingress / APIM). Imposes the entropy floor and a bounded cryptoperiod; the
-	/// throttling control is owned outside the app.
+	/// edge (gateway / ingress / APIM / Front Door / App Gateway WAF). Imposes the entropy floor and a
+	/// bounded cryptoperiod; the §5.2.2 throttling control is owned outside the app.
 	/// </summary>
-	EdgeThrottled = 1,
-
-	/// <summary>
-	/// NIST SP 800-63B-conformant with the entire control set owned in-app (no external attestation
-	/// dependency). Imposes the entropy floor and a bounded cryptoperiod; failed-attempt throttling
-	/// is owned in-process via the distributed cache tier.
-	/// </summary>
-	SelfContained = 2
+	/// <remarks>
+	/// The fronting edge is the operator's responsibility and is <em>not</em> verifiable by the framework:
+	/// a plain-ACA deployment with no edge WAF has no failed-attempt throttle, so this profile's §5.2.2
+	/// conformance is then an unverified external claim. Acceptable in practice for a ≥112-bit look-up secret
+	/// (online guessing is infeasible; SignedRequest's replay guard is the in-app anti-abuse control) — but a
+	/// deployment that needs the §5.2.2 <em>attestation</em> must provision an edge; there is no in-app
+	/// fallback now that <c>SelfContained</c> is dropped. (ADR-0020, 2026-06-08.)
+	/// </remarks>
+	EdgeThrottled = 1
 
 }
