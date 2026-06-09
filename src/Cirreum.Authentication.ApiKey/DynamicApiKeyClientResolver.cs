@@ -102,11 +102,8 @@ public abstract class DynamicApiKeyClientResolver(
 
 		var headerName = context.HeaderName;
 
-		// Per-store conformance profile (when routed via X-Api-Source); null falls back to provider-global.
-		var profile = context.Source?.Profile;
-
-		// 1. Validate format (entropy floor enforced per the store's profile)
-		var formatResult = this._validator.ValidateFormat(providedKey, profile);
+		// 1. Validate request-time format (length + characters; entropy is not checked on a presented key).
+		var formatResult = this._validator.ValidateFormat(providedKey);
 		if (!formatResult.IsValid) {
 			if (this._logger.IsEnabled(LogLevel.Debug)) {
 				this._logger.LogDebug(
@@ -137,9 +134,8 @@ public abstract class DynamicApiKeyClientResolver(
 				continue;
 			}
 
-			// 4. Check expiration (RequireExpiry enforced per the store's profile) and the
-			//    cryptoperiod / max-age (per-key override tightens the configured cap).
-			if (this._validator.IsExpired(storedKey.ExpiresAt, null, profile)
+			// 4. Check expiration (RequireExpiry) and the cryptoperiod / max-age (per-key override tightens).
+			if (this._validator.IsExpired(storedKey.ExpiresAt, null)
 				|| this._validator.IsBeyondMaxAge(storedKey.CreatedAt, storedKey.MaxKeyAge)) {
 				if (this._logger.IsEnabled(LogLevel.Debug)) {
 					this._logger.LogDebug(

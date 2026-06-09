@@ -13,9 +13,6 @@ public sealed record ApiKeySource : IApiKeySource {
 	public required string SourceRef { get; init; }
 
 	/// <inheritdoc />
-	public required ApiKeyConformanceProfile Profile { get; init; }
-
-	/// <inheritdoc />
 	public required ApiKeySourceKind Kind { get; init; }
 
 	/// <inheritdoc />

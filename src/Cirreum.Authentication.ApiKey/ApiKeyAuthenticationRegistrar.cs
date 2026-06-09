@@ -48,6 +48,9 @@ public class ApiKeyAuthenticationRegistrar
 	/// <inheritdoc/>
 	public override string ProviderName => "ApiKey";
 
+	// Bound once in Register; read per-instance in AddAuthenticationHandler for the Form-1 strength check.
+	private ApiKeyValidationOptions _validation = new();
+
 	/// <inheritdoc/>
 	public override void ValidateSettings(ApiKeyAuthenticationInstanceSettings settings) {
 
@@ -95,6 +98,11 @@ public class ApiKeyAuthenticationRegistrar
 		var state = ApiKeySchemeRegistration.GetOrAddState(services);
 		state.BearerPrefix = providerSettings.BearerPrefix;
 
+		// The two-forms strength knobs (Form-1 floor + AllowWeakConfiguredKeys), enforced per instance below.
+		this._validation = configuration
+			.GetSection("Cirreum:Authentication:Providers:ApiKey:Validation")
+			.Get<ApiKeyValidationOptions>() ?? new();
+
 		if (providerSettings.Instances.Count == 0) {
 			return;
 		}
@@ -124,6 +132,26 @@ public class ApiKeyAuthenticationRegistrar
 		var registry = services.GetApiKeyClientRegistry();
 
 		var apiKey = ResolveApiKey(key, configuration);
+
+		// Form-1 strength (ADR-0020): a statically configured key must meet the strength floor (length +
+		// entropy) unless explicitly allowed weak for demo / non-production. Fail fast at startup so a weak
+		// appsettings secret can never silently authenticate (config secrets leak; weak keys are guessable).
+		if (!this._validation.AllowWeakConfiguredKeys) {
+			if (apiKey.Length < this._validation.MinimumKeyLength) {
+				throw new InvalidOperationException(
+					$"Configured ApiKey for instance '{key}' is shorter than the {this._validation.MinimumKeyLength}-character " +
+					$"minimum. Use a stronger key (a generated 256-bit value is recommended), or set " +
+					$"Cirreum:Authentication:Providers:ApiKey:Validation:AllowWeakConfiguredKeys=true for non-production use.");
+			}
+
+			var floor = this._validation.MinimumKeyEntropyBits;
+			if (floor > 0 && ApiKeyEntropyEstimator.EstimateBits(apiKey) < floor) {
+				throw new InvalidOperationException(
+					$"Configured ApiKey for instance '{key}' is below the {floor}-bit minimum strength floor. " +
+					$"Use a stronger key (a generated 256-bit value is recommended), or set " +
+					$"Cirreum:Authentication:Providers:ApiKey:Validation:AllowWeakConfiguredKeys=true for non-production use.");
+			}
+		}
 
 		ApiKeyValidation.ValidateApiKeyUniqueness(apiKey, key, settings.ClientId);
 

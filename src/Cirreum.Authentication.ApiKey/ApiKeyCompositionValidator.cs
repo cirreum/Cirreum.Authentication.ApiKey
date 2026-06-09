@@ -26,16 +26,14 @@ internal static class ApiKeyCompositionValidator {
 		var validation = configuration.GetSection(ValidationSection).Get<ApiKeyValidationOptions>() ?? new();
 
 		// §5: AddResolver(...) registers a blind-scanned (cheap fallback) dynamic resolver. It cannot
-		// carry a hardened profile or PBKDF2 hashing — a sprayer omitting X-Api-Source could otherwise
-		// force the expensive operation across the scan pool. Hardened/addressable stores use AddDynamicStore.
-		if (options.DynamicResolverType is not null &&
-			(validation.ConformanceProfile != ApiKeyConformanceProfile.Baseline ||
-			 validation.HashAlgorithm == ApiKeyHashAlgorithm.Pbkdf2)) {
+		// carry PBKDF2 hashing — a sprayer omitting X-Api-Source could otherwise force the expensive KDF
+		// across the scan pool. Addressable-only managed stores (AddDynamicStore) may use any hasher.
+		if (options.DynamicResolverType is not null && validation.HashAlgorithm == ApiKeyHashAlgorithm.Pbkdf2) {
 			throw new InvalidOperationException(
 				"AddResolver(...) registers a blind-scanned dynamic resolver (the cheap fallback path) and " +
-				"cannot run a hardened conformance profile or PBKDF2 hashing — that would expose a CPU denial " +
-				"of service through the fallback scan (ADR-0020 §5). Use AddDynamicStore<TResolver>(friendlyName, " +
-				"profile) to register an addressable-only store with a hardened profile instead.");
+				"cannot run PBKDF2 hashing — a sprayer omitting X-Api-Source could otherwise force PBKDF2 across " +
+				"the scan pool, a CPU denial of service (ADR-0020 §5). Use AddDynamicStore<TResolver>(friendlyName) " +
+				"to register an addressable-only managed store instead.");
 		}
 	}
 

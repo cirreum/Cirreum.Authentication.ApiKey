@@ -25,7 +25,7 @@ public sealed class DefaultApiKeyValidator(
 	private readonly IApiKeyHasher[] _hashers = hashers as IApiKeyHasher[] ?? [.. hashers];
 
 	/// <inheritdoc/>
-	public ApiKeyFormatValidationResult ValidateFormat(string key, ApiKeyConformanceProfile? profile = null) {
+	public ApiKeyFormatValidationResult ValidateFormat(string key) {
 		if (string.IsNullOrWhiteSpace(key)) {
 			return ApiKeyFormatValidationResult.Invalid("API key cannot be empty");
 		}
@@ -50,10 +50,23 @@ public sealed class DefaultApiKeyValidator(
 			}
 		}
 
-		var entropyFloor = this._options.EffectiveMinimumEntropyBitsFor(profile ?? this._options.ConformanceProfile);
-		if (entropyFloor > 0 && ApiKeyEntropyEstimator.EstimateBits(key) < entropyFloor) {
+		// Entropy is deliberately NOT checked against a presented credential — that would be a structural
+		// oracle. Form-1 configured keys are strength-checked at startup (ValidateConfiguredKeyStrength);
+		// Form-2 managed keys are strong by construction.
+		return ApiKeyFormatValidationResult.Valid();
+	}
+
+	/// <inheritdoc/>
+	public ApiKeyFormatValidationResult ValidateConfiguredKeyStrength(string key) {
+		var format = this.ValidateFormat(key);
+		if (!format.IsValid) {
+			return format;
+		}
+
+		var floor = this._options.MinimumKeyEntropyBits;
+		if (floor > 0 && ApiKeyEntropyEstimator.EstimateBits(key) < floor) {
 			return ApiKeyFormatValidationResult.Invalid(
-				$"API key does not meet the required minimum entropy of {entropyFloor} bits");
+				$"Configured API key does not meet the {floor}-bit minimum strength floor");
 		}
 
 		return ApiKeyFormatValidationResult.Valid();
@@ -107,14 +120,14 @@ public sealed class DefaultApiKeyValidator(
 	}
 
 	/// <inheritdoc/>
-	public bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null, ApiKeyConformanceProfile? profile = null) {
+	public bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null) {
 		if (this._options.AllowExpiredKeys) {
 			return false;
 		}
 
 		if (expiresAt is null) {
-			// A key with no expiry is rejected (treated as expired) when the profile/knob requires one.
-			return this._options.EffectiveRequireExpiryFor(profile ?? this._options.ConformanceProfile);
+			// A key with no expiry is rejected (treated as expired) when RequireExpiry is set.
+			return this._options.RequireExpiry;
 		}
 
 		var effectiveGracePeriod = gracePeriod ?? this._options.ExpirationGracePeriod;
@@ -180,15 +193,19 @@ public sealed class DefaultApiKeyValidator(
 			return false;
 		}
 
-		return IsSelfDescribingHash(storedHash)
-			? this.VerifyHashedKey(providedKey, storedHash)
-			: this.ValidateKeyHash(providedKey, storedHash, salt);
-	}
+		// Dispatch to the single hasher named by the encoded algorithm tag ("{algorithm}$..."). A stored
+		// value with no recognized tag is rejected (fail closed): the legacy bare-SHA-256 path — salt-
+		// optional, single-round, entropy-ungated — is no longer accepted; managed stores persist
+		// HashKeyEncoded(...) output. Dispatching to exactly one hasher (rather than trying all) also
+		// forecloses algorithm confusion should a future hasher's Verify ever be lenient about a foreign tag.
+		var separator = storedHash.IndexOf('$');
+		if (separator <= 0 || !EncodedAlgorithmTags.TryGetValue(storedHash[..separator], out var algorithm)) {
+			return false;
+		}
 
-	private bool VerifyHashedKey(string providedKey, string encodedHash) {
 		foreach (var hasher in this._hashers) {
-			if (hasher.Verify(providedKey, encodedHash)) {
-				return true;
+			if (hasher.Algorithm == algorithm) {
+				return hasher.Verify(providedKey, storedHash);
 			}
 		}
 
@@ -207,9 +224,11 @@ public sealed class DefaultApiKeyValidator(
 			"Register the ApiKey scheme via AddApiKey(...), which registers the built-in hashers.");
 	}
 
-	private static bool IsSelfDescribingHash(string storedHash) =>
-		storedHash.StartsWith("sha256$", StringComparison.Ordinal) ||
-		storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
+	// Maps each self-describing encoded prefix to its algorithm, so VerifyKey dispatches to exactly one hasher.
+	private static readonly Dictionary<string, ApiKeyHashAlgorithm> EncodedAlgorithmTags = new(StringComparer.Ordinal) {
+		["sha256"] = ApiKeyHashAlgorithm.Sha256,
+		["pbkdf2"] = ApiKeyHashAlgorithm.Pbkdf2,
+	};
 
 	/// <summary>
 	/// Generates a cryptographically secure random salt.

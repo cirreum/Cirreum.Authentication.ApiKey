@@ -44,26 +44,32 @@ public sealed class ApiKeyValidationOptions {
 	/// </summary>
 	public string ValidCharacters { get; set; } = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=+/";
 
-	// ---- Conformance profile + knobs (ADR-0020 §2/§3) -------------------------------------------
+	// ---- Two-forms model (ADR-0020 §2/§3) -------------------------------------------------------
+	// Form 1 = statically configured keys (appsettings / Key Vault), enforced at startup by the registrar.
+	// Form 2 = dynamic managed keys (Cirreum-generated, hash-stored), strong by construction.
 
 	/// <summary>
-	/// The conformance profile bundle. Defaults to <see cref="ApiKeyConformanceProfile.Baseline"/>,
-	/// which preserves the framework's historical behavior. The non-Baseline profiles raise the
-	/// entropy floor and require a cryptoperiod; the individual knobs below may only tighten them.
+	/// The minimum estimated entropy (bits, per <see cref="ApiKeyEntropyEstimator"/>) a Form-1
+	/// <em>statically configured</em> key must have. Enforced at startup by the registrar. Default 112
+	/// (the NIST SP 800-63B §5.1.2 look-up-secret floor). Does NOT apply to Form-2 managed keys, which are
+	/// Cirreum-generated and strong by construction; set <see cref="AllowWeakConfiguredKeys"/> to bypass.
 	/// </summary>
-	public ApiKeyConformanceProfile ConformanceProfile { get; set; } = ApiKeyConformanceProfile.Baseline;
+	public int MinimumKeyEntropyBits { get; set; } = DefaultApiKeyGenerator.MinimumEntropyBits;
 
 	/// <summary>
-	/// The minimum estimated entropy (in bits) a presented key must have, per
-	/// <see cref="ApiKeyEntropyEstimator"/>. <c>0</c> disables the check (the Baseline default). The
-	/// effective floor is the larger of this value and the profile's floor — see
-	/// <see cref="EffectiveMinimumEntropyBits"/>.
+	/// When <see langword="true"/>, the startup strength check on Form-1 statically configured keys is
+	/// skipped, allowing weak demo / prototype keys. <see langword="false"/> by default: a configured key
+	/// below <see cref="MinimumKeyLength"/> or <see cref="MinimumKeyEntropyBits"/> fails fast at startup.
+	/// Enable only for non-production use — appsettings secrets leak, and weak keys are guessable.
 	/// </summary>
-	public int MinimumKeyEntropyBits { get; set; }
+	public bool AllowWeakConfiguredKeys { get; set; }
 
 	/// <summary>
-	/// The stored-secret hash algorithm for the dynamic (database-backed) model. Defaults to
-	/// <see cref="ApiKeyHashAlgorithm.Sha256"/>. Static Key-Vault keys are unaffected (compared in-memory).
+	/// The stored-secret hash algorithm for the Form-2 dynamic (database-backed) model. Defaults to
+	/// <see cref="ApiKeyHashAlgorithm.Sha256"/> — a fast salted hash, correct because managed keys are
+	/// high-entropy by construction. <see cref="ApiKeyHashAlgorithm.Pbkdf2"/> is offered only for persisted
+	/// hashes of imported / user-chosen low-entropy secrets. Static (Form-1) keys are compared in-memory
+	/// and unaffected.
 	/// </summary>
 	public ApiKeyHashAlgorithm HashAlgorithm { get; set; } = ApiKeyHashAlgorithm.Sha256;
 
@@ -75,44 +81,14 @@ public sealed class ApiKeyValidationOptions {
 	public int Pbkdf2Iterations { get; set; } = Pbkdf2ApiKeyHasher.DefaultIterations;
 
 	/// <summary>
-	/// When <see langword="true"/>, a key with no expiration is rejected. <see langword="false"/> by
-	/// default (Baseline); the non-Baseline profiles force this on — see <see cref="EffectiveRequireExpiry"/>.
+	/// When <see langword="true"/>, a key with no expiration is rejected on the validation path (both
+	/// forms). <see langword="false"/> by default.
 	/// </summary>
 	public bool RequireExpiry { get; set; }
 
 	/// <summary>
 	/// The maximum permitted age of a key (NIST SP 800-57 cryptoperiod). Enforcement requires a
-	/// key-creation timestamp on the stored key and is wired with the per-key override fields; the
-	/// knob is declared here so the profile/appsettings surface is complete.
+	/// key-creation timestamp on the stored key and the per-key override fields.
 	/// </summary>
 	public TimeSpan? MaxKeyAge { get; set; }
-
-	/// <summary>
-	/// The effective minimum entropy floor for the provider-level <see cref="ConformanceProfile"/>.
-	/// See <see cref="EffectiveMinimumEntropyBitsFor"/> for the per-store override.
-	/// </summary>
-	public int EffectiveMinimumEntropyBits => this.EffectiveMinimumEntropyBitsFor(this.ConformanceProfile);
-
-	/// <summary>
-	/// Whether expiry is effectively required for the provider-level <see cref="ConformanceProfile"/>.
-	/// See <see cref="EffectiveRequireExpiryFor"/> for the per-store override.
-	/// </summary>
-	public bool EffectiveRequireExpiry => this.EffectiveRequireExpiryFor(this.ConformanceProfile);
-
-	/// <summary>
-	/// The effective minimum entropy floor when validating under <paramref name="profile"/> (a per-store
-	/// profile): the larger of <see cref="MinimumKeyEntropyBits"/> and the profile floor (0 for Baseline,
-	/// the NIST SP 800-63B §5.1.2 look-up-secret floor for the hardened profiles). Tighten-only.
-	/// </summary>
-	public int EffectiveMinimumEntropyBitsFor(ApiKeyConformanceProfile profile) =>
-		profile == ApiKeyConformanceProfile.Baseline
-			? this.MinimumKeyEntropyBits
-			: Math.Max(DefaultApiKeyGenerator.MinimumEntropyBits, this.MinimumKeyEntropyBits);
-
-	/// <summary>
-	/// Whether expiry is effectively required when validating under <paramref name="profile"/> (a per-store
-	/// profile): <see langword="true"/> when the profile is non-Baseline or <see cref="RequireExpiry"/> is set.
-	/// </summary>
-	public bool EffectiveRequireExpiryFor(ApiKeyConformanceProfile profile) =>
-		profile != ApiKeyConformanceProfile.Baseline || this.RequireExpiry;
 }

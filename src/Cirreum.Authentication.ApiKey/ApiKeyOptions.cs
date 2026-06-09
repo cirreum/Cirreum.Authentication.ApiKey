@@ -79,11 +79,11 @@ public sealed class ApiKeyOptions {
 	/// <returns>This options instance for chaining.</returns>
 	/// <remarks>
 	/// This is the legacy single-resolver path: it is part of the <b>blind fallback scan</b> (the cheap
-	/// path), so it is restricted to the <c>Baseline</c> profile and SHA-256 hashing — composition fails
-	/// fast otherwise (ADR-0020 §5). For a hardened / addressable-only store, or to run several stores
-	/// with distinct profiles, use <see cref="AddDynamicStore{TResolver}"/> instead; the two are not
-	/// composed together. The resolver is a singleton — depend only on singleton-safe services (e.g.
-	/// inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped data access).
+	/// path), so it is restricted to fast SHA-256 hashing — composition fails fast if PBKDF2 is configured,
+	/// since a sprayer omitting <c>X-Api-Source</c> could otherwise force PBKDF2 across the scan pool
+	/// (ADR-0020 §5). For an addressable-only managed store, use <see cref="AddDynamicStore{TResolver}"/>
+	/// instead; the two are not composed together. The resolver is a singleton — depend only on
+	/// singleton-safe services (e.g. inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c>).
 	/// </remarks>
 	public ApiKeyOptions AddResolver<TResolver>(Action<ApiKeyCachingOptions>? caching = null)
 		where TResolver : class, IApiKeyClientResolver {
@@ -93,25 +93,24 @@ public sealed class ApiKeyOptions {
 	}
 
 	/// <summary>
-	/// Registers a named dynamic (database-backed) key store with its own conformance profile
-	/// (ADR-0020 §4). Each store is addressable-only: it is reached via an explicit <c>X-Api-Source</c>
+	/// Registers a named dynamic (database-backed) "managed" key store (ADR-0020 §4). Keys in a managed
+	/// store are Cirreum-generated (256-bit) and persisted only as a salted hash, so the store is strong
+	/// by construction. Each store is addressable-only: it is reached via an explicit <c>X-Api-Source</c>
 	/// reference derived from <paramref name="friendlyName"/> and is never part of the blind fallback
-	/// scan. Multiple stores may be registered to run different postures side by side (e.g. an internal
-	/// store and a regulated-partner store).
+	/// scan. Multiple stores may be registered side by side (e.g. an internal store and a partner store).
 	/// </summary>
 	/// <typeparam name="TResolver">The app's resolver implementation for this store.</typeparam>
 	/// <param name="friendlyName">The code-given store name; the input to the opaque SourceRef derivation.</param>
-	/// <param name="profile">The conformance profile this store enforces (per-store; ADR-0020 §4).</param>
 	/// <returns>This options instance for chaining.</returns>
 	/// <remarks>
 	/// The store resolver is registered as a singleton keyed by the derived SourceRef — depend only on
 	/// singleton-safe services (inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped
 	/// data access). Friendly names must be unique; a duplicate (or a SourceRef collision) fails fast.
 	/// </remarks>
-	public ApiKeyOptions AddDynamicStore<TResolver>(string friendlyName, ApiKeyConformanceProfile profile)
+	public ApiKeyOptions AddDynamicStore<TResolver>(string friendlyName)
 		where TResolver : class, IApiKeyClientResolver {
 		ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);
-		this._dynamicStores.Add(new ApiKeyDynamicStoreRegistration(friendlyName, profile, typeof(TResolver)));
+		this._dynamicStores.Add(new ApiKeyDynamicStoreRegistration(friendlyName, typeof(TResolver)));
 		return this;
 	}
 

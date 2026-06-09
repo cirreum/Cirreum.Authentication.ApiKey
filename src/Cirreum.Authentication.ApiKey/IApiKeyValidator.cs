@@ -6,13 +6,23 @@ namespace Cirreum.Authentication.ApiKey;
 public interface IApiKeyValidator {
 
 	/// <summary>
-	/// Validates the format of an API key (length, characters, entropy floor).
+	/// Validates the request-time format of a presented API key (length and allowed characters only).
+	/// Entropy is NOT checked here — it is a key-issuance concern (enforced for Form-1 configured keys at
+	/// startup via <see cref="ValidateConfiguredKeyStrength"/>, and guaranteed by construction for Form-2
+	/// managed keys). Checking entropy against a presented credential would be a structural oracle.
 	/// </summary>
-	/// <param name="key">The key to validate.</param>
-	/// <param name="profile">The per-store conformance profile to enforce, or <see langword="null"/> to
-	/// use the provider-level profile. Determines the effective entropy floor (ADR-0020 §4).</param>
+	/// <param name="key">The presented key to validate.</param>
 	/// <returns>A result indicating whether the format is valid.</returns>
-	ApiKeyFormatValidationResult ValidateFormat(string key, ApiKeyConformanceProfile? profile = null);
+	ApiKeyFormatValidationResult ValidateFormat(string key);
+
+	/// <summary>
+	/// Validates that a Form-1 <em>statically configured</em> key meets the strength floor (length, allowed
+	/// characters, and <see cref="ApiKeyValidationOptions.MinimumKeyEntropyBits"/>). Called at startup by the
+	/// registrar; bypass with <see cref="ApiKeyValidationOptions.AllowWeakConfiguredKeys"/> for demos.
+	/// </summary>
+	/// <param name="key">The configured key to validate.</param>
+	/// <returns>A result indicating whether the configured key is strong enough.</returns>
+	ApiKeyFormatValidationResult ValidateConfiguredKeyStrength(string key);
 
 	/// <summary>
 	/// Performs a constant-time comparison of two keys to prevent timing attacks.
@@ -47,10 +57,9 @@ public interface IApiKeyValidator {
 	/// </summary>
 	/// <param name="expiresAt">The expiration time, or <see langword="null"/> if no expiration.</param>
 	/// <param name="gracePeriod">Optional grace period to allow after expiration.</param>
-	/// <param name="profile">The per-store conformance profile to enforce, or <see langword="null"/> to
-	/// use the provider-level profile. Determines whether a missing expiry is rejected (ADR-0020 §4).</param>
-	/// <returns><see langword="true"/> if the key has expired; otherwise, <see langword="false"/>.</returns>
-	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null, ApiKeyConformanceProfile? profile = null);
+	/// <returns><see langword="true"/> if the key has expired; otherwise, <see langword="false"/>. A missing
+	/// expiry is treated as expired when <see cref="ApiKeyValidationOptions.RequireExpiry"/> is set.</returns>
+	bool IsExpired(DateTimeOffset? expiresAt, TimeSpan? gracePeriod = null);
 
 	/// <summary>
 	/// Checks whether a key has exceeded its maximum age / cryptoperiod (NIST SP 800-57), measured from
@@ -83,15 +92,14 @@ public interface IApiKeyValidator {
 	string HashKeyEncoded(string key);
 
 	/// <summary>
-	/// Verifies a presented key against a stored hash, in constant time. Self-describing encoded
-	/// hashes (from <see cref="HashKeyEncoded"/>) are dispatched to the matching hasher; legacy
-	/// bare hashes fall back to <see cref="ValidateKeyHash"/> with the supplied <paramref name="salt"/>.
+	/// Verifies a presented key against a stored, self-describing encoded hash (from
+	/// <see cref="HashKeyEncoded"/>), in constant time, dispatching to the hasher named by the encoded
+	/// algorithm tag. A stored value that is NOT self-describing is rejected (fail closed) — the legacy
+	/// bare-SHA-256 path is no longer accepted; managed stores must persist <see cref="HashKeyEncoded"/> output.
 	/// </summary>
 	/// <param name="providedKey">The key provided in the request.</param>
-	/// <param name="storedHash">The stored hash (self-describing or legacy bare).</param>
-	/// <param name="salt">The legacy salt. It is <b>required</b> when <paramref name="storedHash"/> is a
-	/// legacy bare hash (passing <see langword="null"/> there will fail verification) and is
-	/// <b>ignored</b> when <paramref name="storedHash"/> is a self-describing hash (the salt is embedded).</param>
+	/// <param name="storedHash">The self-describing stored hash (e.g. <c>sha256$…</c> / <c>pbkdf2$…</c>).</param>
+	/// <param name="salt">Ignored (the salt is embedded in a self-describing hash). Retained for back-compat.</param>
 	/// <returns><see langword="true"/> if the key matches; otherwise <see langword="false"/>.</returns>
 	bool VerifyKey(string providedKey, string storedHash, string? salt = null);
 }

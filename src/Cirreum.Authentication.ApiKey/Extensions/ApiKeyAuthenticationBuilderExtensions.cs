@@ -121,8 +121,8 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		IServiceCollection services,
 		IConfiguration configuration) {
 
-		// Provider-level validation options (ConformanceProfile + knobs). Framework defaults live on
-		// the options type (= Baseline); per-store overrides layer on in a later phase.
+		// Provider-level validation options (the two-forms knobs: configured-key strength floor +
+		// AllowWeakConfiguredKeys for Form 1; HashAlgorithm for Form 2). Defaults live on the options type.
 		services.Configure<ApiKeyValidationOptions>(
 			configuration.GetSection("Cirreum:Authentication:Providers:ApiKey:Validation"));
 
@@ -146,7 +146,6 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			catalog.Register(new ApiKeySource {
 				FriendlyName = store.FriendlyName,
 				SourceRef = sourceRef,
-				Profile = store.Profile,
 				Kind = ApiKeySourceKind.Dynamic,
 			});
 

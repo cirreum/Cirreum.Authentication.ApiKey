@@ -12,9 +12,6 @@ public interface IApiKeySource {
 	/// <summary>The opaque, derived wire reference (the <c>X-Api-Source</c> value).</summary>
 	string SourceRef { get; }
 
-	/// <summary>The conformance profile this source enforces.</summary>
-	ApiKeyConformanceProfile Profile { get; }
-
 	/// <summary>The backing kind (static/scannable vs dynamic/addressable).</summary>
 	ApiKeySourceKind Kind { get; }
 
