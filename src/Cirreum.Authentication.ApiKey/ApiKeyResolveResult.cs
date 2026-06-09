@@ -92,6 +92,17 @@ public sealed record ApiKeyResolveResult {
 		};
 
 	/// <summary>
+	/// Creates a result indicating a source requiring an <c>X-Client-Id</c> index was addressed without
+	/// one. The handler maps this to a non-descript <c>400</c> — the resolver is never invoked, so it is
+	/// never forced to scan every client's key (ADR-0020 §6).
+	/// </summary>
+	public static ApiKeyResolveResult MissingClientIndex() =>
+		new() {
+			Outcome = ApiKeyResolveOutcome.MissingClientIndex,
+			FailureReason = "Missing API key client index"
+		};
+
+	/// <summary>
 	/// Creates a result indicating the revocation denylist is not authoritative yet (boot hydration
 	/// incomplete or faulted with the escape hatch off). The handler maps this to a non-descript
 	/// <c>503</c> — the credential was never evaluated; we cannot prove it is not revoked, so we fail

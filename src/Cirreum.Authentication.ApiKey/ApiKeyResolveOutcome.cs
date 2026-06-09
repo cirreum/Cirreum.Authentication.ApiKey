@@ -25,10 +25,17 @@ public enum ApiKeyResolveOutcome {
 	Failed,
 
 	/// <summary>
-	/// No routing signal was supplied while addressable stores exist (ADR-0020 §5). The handler maps
+	/// No routing signal was supplied while addressable sources exist (ADR-0020 §5). The handler maps
 	/// this to a non-descript <c>400</c> rather than a <c>401</c>. Stops the chain.
 	/// </summary>
 	MissingRoutingSignal,
+
+	/// <summary>
+	/// A source that requires an <c>X-Client-Id</c> index was routed to without one. The handler maps
+	/// this to a non-descript <c>400</c> (so the resolver does an indexed lookup rather than a scan).
+	/// Stops the chain.
+	/// </summary>
+	MissingClientIndex,
 
 	/// <summary>
 	/// The revocation denylist is not authoritative yet (boot hydration is incomplete, or it faulted

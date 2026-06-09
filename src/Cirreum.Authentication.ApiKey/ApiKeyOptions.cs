@@ -4,12 +4,12 @@ using Cirreum.Authentication.ApiKey;
 
 /// <summary>
 /// Composition options for <c>AddApiKey(...)</c>. Declares which transports the ApiKey
-/// provider accepts and, optionally, a dynamic <see cref="IApiKeyClientResolver"/> that
-/// validates credentials at request time against an app store.
+/// provider accepts and, optionally, dynamic API key <em>sources</em> — a backing store of keys read
+/// at request time by an <see cref="IApiKeyClientResolver"/> you supply.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three composition modes:
+/// Transports — three composition modes:
 /// </para>
 /// <list type="bullet">
 ///   <item><b>Mode A (default):</b> no <c>AddTransport</c> / <c>AddCustomHeaderTransport</c>
@@ -23,23 +23,25 @@ using Cirreum.Authentication.ApiKey;
 ///   non-standard header escape hatch.</item>
 /// </list>
 /// <para>
-/// Modes B and C combine; declaring any transport explicitly opts out of the
-/// well-known default. A transport with no validation source behind it (no configured
-/// instance, no dynamic resolver covering it) is an orphan: it registers and returns
-/// 401, and the boot-time auth-posture analyzer flags it.
+/// Sources — keys come from one of three places, tried in this precedence when no source is addressed:
+/// statically <b>configured</b> keys (appsettings / Key Vault instances, wired automatically); the
+/// <b>default</b> dynamic source (<see cref="AddDefaultSource{TResolver}"/>, reachable without
+/// <c>X-Api-Source</c>); and <b>named</b> dynamic sources (<see cref="AddNamedSource{TResolver}"/>,
+/// reached only via an explicit <c>X-Api-Source</c> reference). A transport with no source behind it is
+/// an orphan: it registers and returns 401, and the boot-time auth-posture analyzer flags it.
 /// </para>
 /// </remarks>
 public sealed class ApiKeyOptions {
 
 	private readonly List<string> _transports = [];
 	private readonly List<string> _customHeaders = [];
-	private readonly List<ApiKeyDynamicStoreRegistration> _dynamicStores = [];
+	private readonly List<ApiKeyNamedSourceRegistration> _namedSources = [];
 
 	/// <summary>
 	/// Adds a well-known transport (a value from <see cref="ApiKeyTransports"/>). This is a
 	/// <b>restriction, not an addition</b>: the first call opts the provider out of the all-well-known
 	/// default, so from then on <b>only</b> the transports you explicitly add are registered — narrowing
-	/// what the whole provider accepts across every store and client. Omit it entirely (the default) to
+	/// what the whole provider accepts across every source and client. Omit it entirely (the default) to
 	/// keep all well-known transports open; to keep them <em>and</em> add a custom one, list them all
 	/// explicitly plus <see cref="AddCustomHeaderTransport"/>.
 	/// </summary>
@@ -71,50 +73,67 @@ public sealed class ApiKeyOptions {
 	}
 
 	/// <summary>
-	/// Registers a dynamic <see cref="IApiKeyClientResolver"/> that validates presented
-	/// credentials at request time, typically against a database or external store. When
-	/// configured instances also exist, the dynamic resolver is composed after the
-	/// configuration-backed resolver (configured keys win, then the dynamic store).
+	/// Registers the <b>default</b> dynamic API key source — the single source reached when no
+	/// <c>X-Api-Source</c> is supplied (the common single-store case). At most one default source may be
+	/// registered. Keys are validated at request time by <typeparamref name="TResolver"/>, typically
+	/// against a database or external store.
 	/// </summary>
-	/// <typeparam name="TResolver">The app's resolver implementation.</typeparam>
-	/// <param name="caching">Optional caching configuration. When supplied, the resolver
-	/// is wrapped in a <see cref="CachingApiKeyClientResolver"/> with these options;
-	/// when <see langword="null"/>, no caching layer is added.</param>
+	/// <typeparam name="TResolver">The app's resolver implementation for the default source.</typeparam>
+	/// <param name="requireClientId">When <see langword="true"/> (the default), the dispatcher rejects a
+	/// request that would fall to this source with no <c>X-Client-Id</c> as a non-descript <c>400</c>
+	/// before invoking the resolver — guaranteeing an O(1) indexed lookup rather than a scan over every
+	/// client's key. Set <see langword="false"/> only when the key is self-identifying or the store is
+	/// tiny.</param>
+	/// <param name="caching">Optional caching configuration. When supplied, the resolver is wrapped in a
+	/// <see cref="CachingApiKeyClientResolver"/>; when <see langword="null"/>, no caching layer is added.</param>
 	/// <returns>This options instance for chaining.</returns>
 	/// <remarks>
-	/// This is the legacy single-resolver path: it is part of the <b>blind fallback scan</b> (the cheap
-	/// path), so it is restricted to fast SHA-256 hashing — composition fails fast if PBKDF2 is configured,
-	/// since a sprayer omitting <c>X-Api-Source</c> could otherwise force PBKDF2 across the scan pool
-	/// (ADR-0020 §5). For an addressable-only managed store, use <see cref="AddDynamicStore{TResolver}"/>
-	/// instead; the two are not composed together. The resolver is a singleton — depend only on
-	/// singleton-safe services (e.g. inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c>).
+	/// The resolver is a singleton — depend only on singleton-safe services (inject
+	/// <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped data access).
 	/// </remarks>
-	public ApiKeyOptions AddResolver<TResolver>(Action<ApiKeyCachingOptions>? caching = null)
+	public ApiKeyOptions AddDefaultSource<TResolver>(
+		bool requireClientId = true,
+		Action<ApiKeySourceCachingOptions>? caching = null)
 		where TResolver : class, IApiKeyClientResolver {
-		this.DynamicResolverType = typeof(TResolver);
-		this.CachingConfigure = caching;
+
+		if (this.DefaultSource is not null) {
+			throw new InvalidOperationException(
+				"A default API key source is already registered. Call AddDefaultSource(...) at most once; " +
+				"use AddNamedSource(name, ...) for additional, addressable sources.");
+		}
+
+		this.DefaultSource = new ApiKeyDefaultSourceRegistration(typeof(TResolver), requireClientId, caching);
 		return this;
 	}
 
 	/// <summary>
-	/// Registers a named dynamic (database-backed) "managed" key store (ADR-0020 §4). Keys in a managed
-	/// store are Cirreum-generated (256-bit) and persisted only as a salted hash, so the store is strong
-	/// by construction. Each store is addressable-only: it is reached via an explicit <c>X-Api-Source</c>
-	/// reference derived from <paramref name="friendlyName"/> and is never part of the blind fallback
-	/// scan. Multiple stores may be registered side by side (e.g. an internal store and a partner store).
+	/// Registers a <b>named</b>, addressable dynamic API key source (ADR-0020 §4). Each named source is
+	/// reached only via an explicit <c>X-Api-Source</c> reference derived from <paramref name="name"/>,
+	/// and is never part of the no-source fallback. Register several side by side (e.g. an internal
+	/// source and a partner source). Keys are validated at request time by <typeparamref name="TResolver"/>.
 	/// </summary>
-	/// <typeparam name="TResolver">The app's resolver implementation for this store.</typeparam>
-	/// <param name="friendlyName">The code-given store name; the input to the opaque SourceRef derivation.</param>
+	/// <typeparam name="TResolver">The app's resolver implementation for this source.</typeparam>
+	/// <param name="name">The code-given source name; the input to the opaque SourceRef derivation. The
+	/// name stays in code — clients send the derived ref in <c>X-Api-Source</c>, never the name.</param>
+	/// <param name="requireClientId">When <see langword="true"/> (the default), the dispatcher rejects a
+	/// request routed to this source with no <c>X-Client-Id</c> as a non-descript <c>400</c> before
+	/// invoking the resolver (indexed lookup, not a scan). Set <see langword="false"/> only when the key
+	/// is self-identifying or this is a store-per-client source.</param>
+	/// <param name="caching">Optional caching configuration; wraps the resolver in a
+	/// <see cref="CachingApiKeyClientResolver"/> when supplied.</param>
 	/// <returns>This options instance for chaining.</returns>
 	/// <remarks>
-	/// The store resolver is registered as a singleton keyed by the derived SourceRef — depend only on
-	/// singleton-safe services (inject <c>IServiceScopeFactory</c> / <c>IDbContextFactory</c> for scoped
-	/// data access). Friendly names must be unique; a duplicate (or a SourceRef collision) fails fast.
+	/// The resolver is registered as a singleton keyed by the derived SourceRef — depend only on
+	/// singleton-safe services. Names must be unique; a duplicate (or a SourceRef collision) fails fast.
 	/// </remarks>
-	public ApiKeyOptions AddDynamicStore<TResolver>(string friendlyName)
+	public ApiKeyOptions AddNamedSource<TResolver>(
+		string name,
+		bool requireClientId = true,
+		Action<ApiKeySourceCachingOptions>? caching = null)
 		where TResolver : class, IApiKeyClientResolver {
-		ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);
-		this._dynamicStores.Add(new ApiKeyDynamicStoreRegistration(friendlyName, typeof(TResolver)));
+
+		ArgumentException.ThrowIfNullOrWhiteSpace(name);
+		this._namedSources.Add(new ApiKeyNamedSourceRegistration(name, typeof(TResolver), requireClientId, caching));
 		return this;
 	}
 
@@ -128,15 +147,10 @@ public sealed class ApiKeyOptions {
 	/// <summary>Explicitly-added custom header transports (empty unless mode C was used).</summary>
 	internal IReadOnlyList<string> CustomHeaders => _customHeaders;
 
-	/// <summary>The dynamic resolver type, or <see langword="null"/> when validation is
-	/// configuration-only.</summary>
-	internal Type? DynamicResolverType { get; private set; }
+	/// <summary>The default dynamic source, or <see langword="null"/> when none was registered.</summary>
+	internal ApiKeyDefaultSourceRegistration? DefaultSource { get; private set; }
 
-	/// <summary>Caching configuration for the dynamic resolver, or <see langword="null"/>
-	/// when no caching layer is requested.</summary>
-	internal Action<ApiKeyCachingOptions>? CachingConfigure { get; private set; }
-
-	/// <summary>The named dynamic stores declared via <see cref="AddDynamicStore{TResolver}"/>.</summary>
-	internal IReadOnlyList<ApiKeyDynamicStoreRegistration> DynamicStores => this._dynamicStores;
+	/// <summary>The named dynamic sources declared via <see cref="AddNamedSource{TResolver}"/>.</summary>
+	internal IReadOnlyList<ApiKeyNamedSourceRegistration> NamedSources => this._namedSources;
 
 }

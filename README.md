@@ -129,7 +129,7 @@ To run weak demo / prototype keys, set the negative-worded, off-by-default escap
 
 ### Form 2 — dynamic managed keys
 
-Keys minted and stored by the application through a dynamic store — `AddDynamicStore<TResolver>(name)` for an addressable, multi-store managed key set (the recommended path; reached by `X-Api-Source`), or the legacy single-store `AddResolver<TResolver>()` (the cheap blind-scan path). These are strong by construction: generate them with `IApiKeyGenerator` (256-bit CSPRNG, URL-safe) and persist only a self-describing hash via `IApiKeyValidator.HashKeyEncoded(...)`.
+Keys minted and stored by the application through a dynamic source — `AddDefaultSource<TResolver>()` for the single, no-routing-header source (the common case), or `AddNamedSource<TResolver>(name)` for additional addressable sources reached via `X-Api-Source`. These are strong by construction: generate them with `IApiKeyGenerator` (256-bit CSPRNG, URL-safe) and persist only a self-describing hash via `IApiKeyValidator.HashKeyEncoded(...)`.
 
 ```csharp
 // Generate a 256-bit secret (raw portion); prefix with ak_{env}_ if you use BearerPrefix.
@@ -173,11 +173,11 @@ To accept the well-known set **plus** a custom header, list them all explicitly 
 
 ```csharp
 auth.AddApiKey(o => o
-    .AddTransport(ApiKeyTransports.Bearer)
-    .AddTransport(ApiKeyTransports.XApiKey)
-    .AddTransport(ApiKeyTransports.OcpApimSubscriptionKey)
-    .AddTransport(ApiKeyTransports.XAuthToken)
-    .AddCustomHeaderTransport("X-Partner-Key"));
+	.AddTransport(ApiKeyTransports.Bearer)
+	.AddTransport(ApiKeyTransports.XApiKey)
+	.AddTransport(ApiKeyTransports.OcpApimSubscriptionKey)
+	.AddTransport(ApiKeyTransports.XAuthToken)
+	.AddCustomHeaderTransport("X-Partner-Key"));
 ```
 
 ## Architecture
@@ -199,24 +199,23 @@ ApiKeyAuthenticationHandler  (AuthenticationHandler<ApiKeyAuthenticationOptions>
 
 ApiKeyClientRegistry / ApiKeyClientEntry  (per-instance API key state)
 ApiKeyProviderState  (per-host scheme-claim + cross-instance key-uniqueness guard)
-IApiKeyClientResolver  (Configuration / Dynamic / Caching / Composite / SourceDispatching)
+IApiKeyClientResolver  (Configuration / Dynamic / Caching; ApiKeySourceDispatcher routes + composes them)
 IApiKeyDenylist  (per-request revocation consult, boot-hydrated, fail-closed)
 ```
 
 ## Dynamic API key resolution
 
-For large-scale deployments with many partners/customers, implement database-backed resolution:
+For keys stored in a database or external system, register a dynamic **source** backed by a resolver you implement. Most apps need just one — the **default source**, reached without any routing header.
 
 ### Basic setup
 
 ```csharp
 builder.AddAuthentication(auth => auth
 	.AddApiKey(o => o
-		.AddTransport(ApiKeyTransports.XApiKey) // restricts to X-Api-Key only — see "Declaring transports"
-		.AddResolver<DatabaseApiKeyResolver>()));
+		.AddDefaultSource<DatabaseApiKeyResolver>()));
 ```
 
-> The `AddTransport(...)` above restricts the provider to **`X-Api-Key` only**. Drop it to keep all well-known transports open (the resolver's `SupportedHeaders` still scopes which headers it answers). See [Declaring transports — and when *not* to](#declaring-transports--and-when-not-to).
+By default the source **requires an `X-Client-Id` header** so your resolver does an O(1) indexed lookup rather than scanning (and hashing) every client's key — the dispatcher rejects a request without it as a non-descript `400` before your resolver runs. Pass `requireClientId: false` only for a self-identifying key or a tiny store.
 
 ### Implementing a custom resolver
 
@@ -234,16 +233,13 @@ public class DatabaseApiKeyResolver(
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken) {
 
+		// With requireClientId (the default), X-Client-Id is guaranteed present — query by it (indexed,
+		// returns at most one key) rather than scanning. If you set requireClientId: false, fall back to
+		// your own narrowing here.
 		var clientId = context.GetHeader("X-Client-Id");
-		if (!string.IsNullOrEmpty(clientId)) {
-			return await db.QueryAsync<StoredApiKey>(
-				"SELECT * FROM ApiKeys WHERE ClientId = @ClientId AND IsActive = 1",
-				new { ClientId = clientId });
-		}
-
 		return await db.QueryAsync<StoredApiKey>(
-			"SELECT * FROM ApiKeys WHERE HeaderName = @HeaderName AND IsActive = 1",
-			new { HeaderName = context.HeaderName });
+			"SELECT * FROM ApiKeys WHERE ClientId = @ClientId AND IsActive = 1",
+			new { ClientId = clientId });
 	}
 }
 ```
@@ -253,8 +249,7 @@ public class DatabaseApiKeyResolver(
 ```csharp
 builder.AddAuthentication(auth => auth
 	.AddApiKey(o => o
-		.AddTransport(ApiKeyTransports.XApiKey)
-		.AddResolver<DatabaseApiKeyResolver>(caching => {
+		.AddDefaultSource<DatabaseApiKeyResolver>(caching: caching => {
 			caching.SuccessCacheDuration = TimeSpan.FromMinutes(5);
 			// Negative (miss) caching is OFF by default — enabling it can reject a
 			// newly provisioned or just-rotated key for up to NotFoundCacheDuration.
@@ -263,11 +258,21 @@ builder.AddAuthentication(auth => auth
 		})));
 ```
 
-Cache entries are keyed by the routing dimension (`X-Api-Source`) together with the header and a hash of the key, so a result cached for one store never satisfies a lookup for another.
+Cache entries are keyed by the routing dimension (`X-Api-Source`) together with the header and a hash of the key, so a result cached for one source never satisfies a lookup for another.
 
-## Multi-store routing
+## Multiple sources
 
-A single ApiKey provider can front several key sets. A *configured* (static) set is cheap and participates in the blind fallback scan; a *dynamic* set registered with `AddDynamicStore<TResolver>(name)` is **addressable-only** — reached solely by an explicit `X-Api-Source` header carrying the store's opaque reference, and never blind-scanned (the CPU-DoS guarantee). When addressable stores exist and a Bearer credential arrives with no `X-Api-Source`, the handler returns a non-descript **`400`** (missing routing signal) — it never enumerates valid sources nor scans expensive stores.
+A single ApiKey provider can front several key sets, tried in this precedence when no `X-Api-Source` is supplied: static **configured** keys (in-memory, cheap) → the **default** source → (nothing else; named sources are not reached without their address). Additional **named** sources are *addressable-only* — registered with `AddNamedSource<TResolver>("name", ...)` and reached solely via an explicit `X-Api-Source` header carrying the source's **opaque derived reference** (not the friendly name), never blind-scanned (the CPU-DoS guarantee). An addressed source is **authoritative**: if the key isn't valid there, the request fails — it does not fall through to the default.
+
+```csharp
+builder.AddAuthentication(auth => auth
+	.AddApiKey(o => o
+		.AddDefaultSource<InternalKeyResolver>()            // reached when no X-Api-Source is sent
+		.AddNamedSource<PartnerKeyResolver>("partner-a")    // reached via X-Api-Source
+		.AddNamedSource<PartnerKeyResolver>("partner-b")));
+```
+
+When named sources exist and a Bearer credential arrives with no `X-Api-Source` (and no configured/default match), the handler returns a non-descript **`400`** (missing routing signal) — it never enumerates valid sources nor scans. A source that requires `X-Client-Id` but receives none is likewise a non-descript **`400`**.
 
 ## Revocation
 

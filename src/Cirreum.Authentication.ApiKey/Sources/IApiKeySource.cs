@@ -1,8 +1,10 @@
 namespace Cirreum.Authentication.ApiKey;
 
 /// <summary>
-/// A registered API key source (a "key set" — ADR-0020 §4): a backing store of keys with an opaque,
-/// derived <see cref="SourceRef"/> for routing.
+/// A registered, addressable API key source (a "key set" — ADR-0020 §4): a named backing store of
+/// keys, reached via an explicit <c>X-Api-Source</c> reference. Carries the code-given friendly name,
+/// the opaque derived <see cref="SourceRef"/> used on the wire, and whether the source requires an
+/// <c>X-Client-Id</c> index on every request.
 /// </summary>
 public interface IApiKeySource {
 
@@ -12,13 +14,12 @@ public interface IApiKeySource {
 	/// <summary>The opaque, derived wire reference (the <c>X-Api-Source</c> value).</summary>
 	string SourceRef { get; }
 
-	/// <summary>The backing kind (static/scannable vs dynamic/addressable).</summary>
-	ApiKeySourceKind Kind { get; }
-
 	/// <summary>
-	/// Whether this source is reachable only by explicit <c>X-Api-Source</c> address and must never be
-	/// part of the blind fallback scan (the CPU-DoS guarantee). True for all dynamic stores.
+	/// Whether a request routed to this source must carry an <c>X-Client-Id</c> header. When
+	/// <see langword="true"/>, the dispatcher rejects a request to this source with no client index as a
+	/// non-descript <c>400</c> before invoking the resolver — so the resolver does an O(1) indexed
+	/// lookup rather than scanning (and hashing) every client's key.
 	/// </summary>
-	bool IsAddressableOnly { get; }
+	bool RequireClientId { get; }
 
 }

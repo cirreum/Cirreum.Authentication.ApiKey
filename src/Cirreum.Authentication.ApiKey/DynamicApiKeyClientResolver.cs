@@ -127,8 +127,8 @@ public abstract class DynamicApiKeyClientResolver(
 			return ApiKeyResolveResult.Failed("Key lookup failed");
 		}
 
-		// 3. Find matching key using secure hash comparison. VerifyKey dispatches self-describing
-		//    (PHC) hashes to the matching hasher and falls back to the legacy salted-SHA-256 path.
+		// 3. Find matching key using secure hash comparison. VerifyKey dispatches each self-describing
+		//    (PHC) hash to the single matching hasher and fails closed on any non-self-describing value.
 		foreach (var storedKey in storedKeys) {
 			if (!this._validator.VerifyKey(providedKey, storedKey.KeyHash, storedKey.Salt)) {
 				continue;

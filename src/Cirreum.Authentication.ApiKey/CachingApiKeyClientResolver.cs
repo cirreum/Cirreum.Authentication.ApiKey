@@ -31,13 +31,13 @@ using System.Text;
 public sealed class CachingApiKeyClientResolver(
 	IApiKeyClientResolver inner,
 	IMemoryCache cache,
-	IOptions<ApiKeyCachingOptions> options,
+	IOptions<ApiKeySourceCachingOptions> options,
 	ILogger<CachingApiKeyClientResolver> logger
 ) : IApiKeyClientResolver, IDisposable {
 
 	private readonly IApiKeyClientResolver _inner = inner ?? throw new ArgumentNullException(nameof(inner));
 	private readonly IMemoryCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-	private readonly ApiKeyCachingOptions _options = options?.Value ?? new ApiKeyCachingOptions();
+	private readonly ApiKeySourceCachingOptions _options = options?.Value ?? new ApiKeySourceCachingOptions();
 	private readonly ILogger<CachingApiKeyClientResolver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 	private readonly bool _ownsCache = false;
 
@@ -52,12 +52,12 @@ public sealed class CachingApiKeyClientResolver(
 	/// <param name="logger">The logger.</param>
 	public CachingApiKeyClientResolver(
 		IApiKeyClientResolver inner,
-		IOptions<ApiKeyCachingOptions> options,
+		IOptions<ApiKeySourceCachingOptions> options,
 		ILogger<CachingApiKeyClientResolver> logger)
 		: this(
 			inner,
 			new MemoryCache(new MemoryCacheOptions { SizeLimit = options?.Value?.MaxCacheEntries ?? 10_000 }),
-			options ?? Options.Create(new ApiKeyCachingOptions()),
+			options ?? Options.Create(new ApiKeySourceCachingOptions()),
 			logger) {
 		_ownsCache = true;
 	}

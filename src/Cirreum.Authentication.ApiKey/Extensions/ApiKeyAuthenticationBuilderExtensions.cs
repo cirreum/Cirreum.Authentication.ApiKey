@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 /// Available inside the <c>configure</c> callback of <c>AddAuthentication(...)</c> on the
 /// umbrella package — the single, unified entry point for the ApiKey
 /// provider: it declares transports (the schemes that exist), binds any configured
-/// instances from appsettings, and optionally wires a dynamic resolver.
+/// instances from appsettings, and optionally wires dynamic API key sources.
 /// </summary>
 public static class ApiKeyAuthenticationBuilderExtensions {
 
@@ -29,25 +29,24 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 	/// <summary>
 	/// Composes the ApiKey authentication provider. Binds configured instances from
 	/// <c>Cirreum:Authentication:Providers:ApiKey</c>, registers the declared transport
-	/// schemes, and wires the credential-validation source.
+	/// schemes, and wires the credential-validation sources.
 	/// </summary>
 	/// <param name="builder">The Cirreum authentication builder.</param>
 	/// <param name="configure">Optional options callback selecting transports
 	/// (<see cref="ApiKeyOptions.AddTransport"/> / <see cref="ApiKeyOptions.AddCustomHeaderTransport"/>)
-	/// and/or a dynamic resolver (<see cref="ApiKeyOptions.AddResolver{T}"/>). When
-	/// omitted (or with no transport declared), all well-known transports register.</param>
+	/// and/or dynamic sources (<see cref="ApiKeyOptions.AddDefaultSource{T}"/> /
+	/// <see cref="ApiKeyOptions.AddNamedSource{T}"/>). When omitted (or with no transport declared), all
+	/// well-known transports register.</param>
 	/// <returns>The builder for chaining.</returns>
 	/// <remarks>
 	/// <para>
-	/// Validation-source resolution:
+	/// Validation-source resolution (in precedence order when no <c>X-Api-Source</c> is supplied):
 	/// </para>
 	/// <list type="bullet">
-	///   <item>Configured instances only → the configuration-backed resolver.</item>
-	///   <item>Dynamic resolver only → that resolver (optionally cached).</item>
-	///   <item>Both → the configuration resolver composed ahead of the dynamic resolver
-	///   (<see cref="CompositeApiKeyClientResolver"/>): configured keys are tried first,
-	///   then the dynamic store.</item>
-	///   <item>Neither → a no-op resolver so orphaned schemes return 401 cleanly; the
+	///   <item>Statically configured instances → the configuration-backed resolver (tried first).</item>
+	///   <item>A default dynamic source → the no-<c>X-Api-Source</c> fallback.</item>
+	///   <item>Named dynamic sources → reached only via an explicit <c>X-Api-Source</c> reference.</item>
+	///   <item>None → a no-op resolver so orphaned schemes return 401 cleanly; the
 	///   boot-time auth-posture analyzer flags the orphan transports.</item>
 	/// </list>
 	/// </remarks>
@@ -76,9 +75,9 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		//     primitives (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
 		RegisterValidationServices(services, builder.Configuration);
 
-		// 1c. Register the source catalog and any named dynamic stores (ADR-0020 §4/§6). Each store's
-		//     resolver is registered in DI keyed by its derived SourceRef for addressable dispatch.
-		RegisterSourceCatalog(services, options);
+		// 1c. Register the source catalog, the named dynamic sources (keyed by derived SourceRef for
+		//     addressable dispatch), and the default dynamic source (ADR-0020 §4/§6).
+		RegisterSources(services, options);
 
 		// 1d. Register the revocation denylist, the CredentialRevoked auth-event handler, the boot-time
 		//     hydrator + its fail-closed readiness gate, and the revocation health check (ADR-0020 §8).
@@ -87,12 +86,8 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
 		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
 
-		// 3. Wire the active IApiKeyClientResolver from the available validation sources.
-		WireResolver(options, services, hasInstances: providerSettings is { Instances.Count: > 0 });
-
-		// 4. Composition fail-fast guards (ADR-0020 §4/§5): the legacy blind-scanned AddResolver path
-		//    cannot carry a hardened profile or PBKDF2 (the CPU-DoS guard).
-		ApiKeyCompositionValidator.Validate(options, builder.Configuration);
+		// 3. Wire the source dispatcher — the single IApiKeyClientResolver the handler calls.
+		WireDispatcher(services);
 
 		return builder;
 	}
@@ -128,6 +123,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 		// High-entropy key generator.
 		services.TryAddSingleton<IApiKeyGenerator, DefaultApiKeyGenerator>();
+		services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
 
 		// Self-describing hashers for the dynamic model; selected per the HashAlgorithm knob and
 		// dispatched on verify by the encoded prefix.
@@ -137,20 +133,31 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 				sp.GetRequiredService<IOptions<ApiKeyValidationOptions>>().Value.Pbkdf2Iterations)));
 	}
 
-	private static void RegisterSourceCatalog(IServiceCollection services, ApiKeyOptions options) {
+	private static void RegisterSources(IServiceCollection services, ApiKeyOptions options) {
 		var catalog = GetOrAddCatalog(services);
 
-		foreach (var store in options.DynamicStores) {
-			var sourceRef = ApiKeySourceRef.Derive(store.FriendlyName);
+		// Named, addressable sources: each is registered in the catalog (carrying its RequireClientId
+		// policy) and its resolver is registered in DI keyed by the derived SourceRef.
+		foreach (var named in options.NamedSources) {
+			var sourceRef = ApiKeySourceRef.Derive(named.FriendlyName);
 
 			catalog.Register(new ApiKeySource {
-				FriendlyName = store.FriendlyName,
+				FriendlyName = named.FriendlyName,
 				SourceRef = sourceRef,
-				Kind = ApiKeySourceKind.Dynamic,
+				RequireClientId = named.RequireClientId,
 			});
 
-			// The store's resolver is addressable by its SourceRef (dispatch wired in P4b).
-			services.AddKeyedSingleton(typeof(IApiKeyClientResolver), sourceRef, store.ResolverType);
+			var resolverType = named.ResolverType;
+			var caching = named.Caching;
+			services.AddKeyedSingleton<IApiKeyClientResolver>(sourceRef, (sp, _) =>
+				WrapWithCaching((IApiKeyClientResolver)ActivatorUtilities.CreateInstance(sp, resolverType), caching, sp));
+		}
+
+		// The default (un-named) source — the no-X-Api-Source fallback, at most one.
+		if (options.DefaultSource is { } def) {
+			services.AddSingleton(sp => new ApiKeyDefaultSource(
+				WrapWithCaching((IApiKeyClientResolver)ActivatorUtilities.CreateInstance(sp, def.ResolverType), def.Caching, sp),
+				def.RequireClientId));
 		}
 	}
 
@@ -207,71 +214,38 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		}
 	}
 
-	private static void WireResolver(
-		ApiKeyOptions options,
-		IServiceCollection services,
-		bool hasInstances) {
-
-		services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
-
-		var resolverType = options.DynamicResolverType;
-
-		// Build the "scan" resolver — the cheap (static config) path, plus the legacy single dynamic
-		// resolver (AddResolver) for back-compat. Named multi-stores (AddDynamicStore) are NOT here;
-		// they are addressable-only and routed by X-Api-Source via the dispatcher below.
-		Func<IServiceProvider, IApiKeyClientResolver> scanFactory;
-
-		if (resolverType is null) {
-			if (hasInstances) {
-				scanFactory = sp => sp.GetRequiredService<ConfigurationApiKeyClientResolver>();
-			} else {
-				services.TryAddSingleton<NullApiKeyClientResolver>();
-				scanFactory = sp => sp.GetRequiredService<NullApiKeyClientResolver>();
-			}
-		} else {
-			services.TryAddSingleton(resolverType);
-			if (options.CachingConfigure is not null) {
-				services.Configure(options.CachingConfigure);
-			}
-
-			scanFactory = sp => {
-				var dynamicResolver = WrapWithCaching(
-					(IApiKeyClientResolver)sp.GetRequiredService(resolverType),
-					options.CachingConfigure is not null,
-					sp);
-
-				if (!hasInstances) {
-					return dynamicResolver;
-				}
-
-				return new CompositeApiKeyClientResolver(
-					[sp.GetRequiredService<ConfigurationApiKeyClientResolver>(), dynamicResolver],
-					sp.GetRequiredService<ILogger<CompositeApiKeyClientResolver>>());
-			};
-		}
-
-		// The handler's IApiKeyClientResolver is the source-aware dispatcher: it routes X-Api-Source
-		// to keyed store resolvers (O(1)), restricts the blind scan to the cheap path, and emits the
-		// missing-routing-signal result (→ 400) when appropriate (ADR-0020 §5).
+	private static void WireDispatcher(IServiceCollection services) {
+		// The handler's IApiKeyClientResolver is the source dispatcher: it tries config first, falls back
+		// to the default source, and routes X-Api-Source to keyed named sources — never blind-scanning
+		// dynamic keys (ADR-0020 §5/§6). Config and the default source are optional (resolved as null
+		// when not registered).
 		services.AddSingleton<IApiKeyClientResolver>(sp =>
-			new SourceDispatchingApiKeyClientResolver(
-				scanFactory(sp),
+			new ApiKeySourceDispatcher(
+				sp.GetService<ConfigurationApiKeyClientResolver>(),
+				sp.GetService<ApiKeyDefaultSource>(),
 				sp.GetRequiredService<IApiKeySourceCatalog>(),
 				sp.GetRequiredService<IApiKeyDenylist>(),
 				sp.GetRequiredService<ApiKeyRevocationReadiness>(),
 				sp,
-				sp.GetRequiredService<ILogger<SourceDispatchingApiKeyClientResolver>>()));
+				sp.GetRequiredService<ILogger<ApiKeySourceDispatcher>>()));
 	}
 
 	private static IApiKeyClientResolver WrapWithCaching(
 		IApiKeyClientResolver inner,
-		bool caching,
-		IServiceProvider sp) =>
-		caching
-			? new CachingApiKeyClientResolver(
-				inner,
-				sp.GetRequiredService<IOptions<ApiKeyCachingOptions>>(),
-				sp.GetRequiredService<ILogger<CachingApiKeyClientResolver>>())
-			: inner;
+		Action<ApiKeySourceCachingOptions>? caching,
+		IServiceProvider sp) {
+
+		if (caching is null) {
+			return inner;
+		}
+
+		var cachingOptions = new ApiKeySourceCachingOptions();
+		caching(cachingOptions);
+
+		return new CachingApiKeyClientResolver(
+			inner,
+			Options.Create(cachingOptions),
+			sp.GetRequiredService<ILogger<CachingApiKeyClientResolver>>());
+	}
 
 }

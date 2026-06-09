@@ -1,9 +1,12 @@
 namespace Cirreum.Authentication.ApiKey;
 
 /// <summary>
-/// Options for API key resolution caching behavior.
+/// Options for caching a dynamic source's resolutions (the resolved <see cref="ApiKeyClient"/>, and
+/// optionally negative "miss" results). Supplied per source via <c>AddDefaultSource</c> /
+/// <c>AddNamedSource</c>; when supplied, the source's resolver is wrapped in a
+/// <see cref="CachingApiKeyClientResolver"/>.
 /// </summary>
-public sealed class ApiKeyCachingOptions {
+public sealed class ApiKeySourceCachingOptions {
 
 	/// <summary>
 	/// Gets or sets the duration to cache successful resolutions.

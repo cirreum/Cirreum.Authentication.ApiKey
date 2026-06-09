@@ -54,14 +54,14 @@ public class ApiKeyAuthenticationHandler(
 		"scope",
 	};
 
-	private bool _missingRoutingSignal;
+	private bool _badRequest;
 	private bool _revocationUnavailable;
 
 	/// <inheritdoc/>
 	protected override async Task<AuthenticateResult> HandleAuthenticateAsync() {
 
 		// Reset per-invocation state (the handler instance may be reused within a request).
-		this._missingRoutingSignal = false;
+		this._badRequest = false;
 		this._revocationUnavailable = false;
 
 		var transport = this.Options.Transport;
@@ -110,10 +110,10 @@ public class ApiKeyAuthenticationHandler(
 			context,
 			this.Context.RequestAborted);
 
-		if (result.RequiresRouting) {
-			// Missing routing signal → non-descript 400 (see HandleChallengeAsync). Never a blind
-			// scan of expensive stores, never an enumeration of valid sources.
-			this._missingRoutingSignal = true;
+		if (result.Outcome is ApiKeyResolveOutcome.MissingRoutingSignal or ApiKeyResolveOutcome.MissingClientIndex) {
+			// Missing a required routing/index header → non-descript 400 (see HandleChallengeAsync).
+			// Never a blind scan of expensive sources, never an enumeration of valid sources.
+			this._badRequest = true;
 			return AuthenticateResult.Fail(result.FailureReason ?? "Bad request");
 		}
 
@@ -196,8 +196,8 @@ public class ApiKeyAuthenticationHandler(
 
 	/// <inheritdoc/>
 	protected override Task HandleChallengeAsync(AuthenticationProperties properties) {
-		if (this._missingRoutingSignal) {
-			// Non-descript 400: no WWW-Authenticate, nothing that enumerates valid sources (ADR-0020 §5).
+		if (this._badRequest) {
+			// Non-descript 400: no WWW-Authenticate, nothing that enumerates valid sources (ADR-0020 §5/§6).
 			this.Response.StatusCode = 400;
 			return Task.CompletedTask;
 		}

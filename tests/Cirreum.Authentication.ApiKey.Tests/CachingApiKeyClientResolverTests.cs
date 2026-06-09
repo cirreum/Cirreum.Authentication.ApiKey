@@ -10,8 +10,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CachingApiKeyClientResolverTests {
 
-	private static CachingApiKeyClientResolver Caching(IApiKeyClientResolver inner, ApiKeyCachingOptions? options = null) =>
-		new(inner, Options.Create(options ?? new ApiKeyCachingOptions()),
+	private static CachingApiKeyClientResolver Caching(IApiKeyClientResolver inner, ApiKeySourceCachingOptions? options = null) =>
+		new(inner, Options.Create(options ?? new ApiKeySourceCachingOptions()),
 			NullLogger<CachingApiKeyClientResolver>.Instance);
 
 	[Fact]
@@ -39,7 +39,7 @@ public sealed class CachingApiKeyClientResolverTests {
 	[Fact]
 	public async Task Negative_caching_when_enabled_caches_a_miss() {
 		var inner = new TestResolvers.Stub(ApiKeyResolveResult.NotFound());
-		var caching = Caching(inner, new ApiKeyCachingOptions { EnableNegativeCaching = true });
+		var caching = Caching(inner, new ApiKeySourceCachingOptions { EnableNegativeCaching = true });
 
 		await caching.ResolveAsync("k", TestResolvers.Context());
 		await caching.ResolveAsync("k", TestResolvers.Context());
