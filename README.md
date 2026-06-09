@@ -22,9 +22,11 @@ The package implements the ApiKey scheme of the Cirreum Authentication track. Ap
 - **Per-client transport acceptance** — Configure each client's `AcceptedTransports` independently; a client accepting both Bearer and a custom header is reachable through both ASP.NET schemes but uses the same key material.
 - **Bearer-prefix disambiguation** — Optional per-provider `BearerPrefix` (e.g. `ak_prod_`) — modeled on Stripe / GitHub / Slack — lets multiple Bearer-probing providers coexist without colliding. Falls back to JWT-shape disambiguation when no prefix is configured.
 - **Selector-based dispatch** — Ships `ApiKeyBearerSchemeSelector` (implements `IBearerSchemeSelector`, `Priority = SchemeSelectorPriority.Key`) for the Bearer transport, plus one `ApiKeyHeaderSchemeSelector` per configured custom-header name.
-- **Secure validation** — Constant-time comparison via `CryptographicOperations.FixedTimeEquals` prevents timing attacks.
-- **Role-based claims** — Configure roles per client for downstream authorization.
-- **Dynamic resolution** — Database-backed `DynamicApiKeyClientResolver` for large-scale partner deployments, with optional caching.
+- **Secure validation** — Constant-time comparison via `CryptographicOperations.FixedTimeEquals` prevents timing attacks. Stored hashes are self-describing (PHC-style `{algorithm}$…`) and verified by fail-closed single-algorithm dispatch.
+- **Two forms of keys** — *Configured* keys (appsettings / Key Vault) with a startup strength floor, and *managed* keys (Cirreum-generated, hash-stored) that are strong by construction. See [Two forms of keys](#two-forms-of-keys).
+- **Revocation** — A per-request denylist consulted after the cache, hydrated at boot, with a **fail-closed** posture and a health check. See [Revocation](#revocation).
+- **Role-based claims** — Configure roles per client for downstream authorization. Custom claims cannot shadow the reserved framework claim types.
+- **Dynamic resolution** — Database-backed `DynamicApiKeyClientResolver` for large-scale partner deployments, with optional caching and `X-Api-Source` store routing.
 
 ### Use cases
 
@@ -97,29 +99,37 @@ Add API key clients to your `appsettings.json`:
 
 A client whose `AcceptedTransports` includes both flags is reachable via the `ApiKey:Bearer` scheme AND the `ApiKey:{HeaderName}` scheme — the same key material, validated at request time against whichever scheme handler ran.
 
-### Secure key storage
+## Two forms of keys
 
-API keys can be provided in two ways (checked in order):
+ApiKey supports two distinct forms, each with its own strength model (ADR-0020 §2/§3):
 
-1. **Direct value** — `Key` property in instance configuration (dev/testing only)
-2. **Connection string** — `ConnectionStrings:{InstanceName}` in configuration (production)
+### Form 1 — statically configured keys
 
-For production environments, store API keys in Azure Key Vault using the connection string pattern. The instance name is used as the connection string key, allowing both the API and client applications to resolve the same secret from Key Vault.
+Keys declared in `appsettings` / Key Vault and bound by the registrar (the `Instances` block above). At **startup**, each configured key is checked against a strength floor — a minimum length (`MinimumKeyLength`, default 32) and a minimum estimated entropy (`MinimumKeyEntropyBits`, default **112 bits**, the NIST SP 800-63B §5.1.2 look-up-secret floor). A key below the floor **fails fast at boot** rather than silently authenticating. Entropy is *never* evaluated against a presented credential at request time (that would be a structural oracle) — only at startup.
 
-### Generating API keys
+To run weak demo / prototype keys, set the negative-worded, off-by-default escape hatch:
 
-When using the `BearerPrefix` convention:
-
-```csharp
-var raw = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-var key = $"ak_prod_{raw}";
+```json
+{ "Cirreum": { "Authentication": { "Providers": { "ApiKey": {
+  "Validation": { "AllowWeakConfiguredKeys": true }
+}}}}}
 ```
 
-When no prefix is configured (opaque-only), generate the raw bytes alone:
+> ⚠ `AllowWeakConfiguredKeys` is for non-production use only. Configured secrets leak (logs, source control, config dumps) and weak keys are guessable.
+
+**Key-Vault-at-rest is a requirement for Form 1 in production.** Configured keys are compared constant-time in memory, but they live in configuration — provide them via `ConnectionStrings:{InstanceName}` resolved from Azure Key Vault (the instance name is the connection-string key), never as a literal `Key` in committed `appsettings`. The literal `Key` property is for dev/testing only.
+
+### Form 2 — dynamic managed keys
+
+Keys minted and stored by the application through a dynamic store (`AddDynamicStore<TResolver>(name)` / `AddResolver<TResolver>()`). These are strong by construction: generate them with `IApiKeyGenerator` (256-bit CSPRNG, URL-safe) and persist only a self-describing hash via `IApiKeyValidator.HashKeyEncoded(...)`.
 
 ```csharp
-var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+// Generate a 256-bit secret (raw portion); prefix with ak_{env}_ if you use BearerPrefix.
+var raw = generator.Generate();                 // IApiKeyGenerator — 256-bit, URL-safe
+var stored = validator.HashKeyEncoded(raw);     // "sha256$…" — store THIS, hand `raw` to the client once
 ```
+
+The stored-hash algorithm is set by `Validation:HashAlgorithm` — **`Sha256`** (default; a fast salted hash, correct because managed keys are high-entropy) or **`Pbkdf2`** (a work-factored KDF, offered only for *imported* low-entropy secrets). Verification dispatches on the encoded algorithm tag and is **fail-closed**: a stored value that is not self-describing is rejected (the legacy bare-SHA-256 path is gone).
 
 ## Multi-scheme model
 
@@ -157,8 +167,9 @@ ApiKeyAuthenticationHandler  (AuthenticationHandler<ApiKeyAuthenticationOptions>
 └── builds ClaimsPrincipal with ClientId, ClientName, Roles
 
 ApiKeyClientRegistry / ApiKeyClientEntry  (per-instance API key state)
-ApiKeyValidation  (cross-instance uniqueness guard)
-IApiKeyClientResolver  (Configuration / Dynamic / Caching / Composite implementations)
+ApiKeyProviderState  (per-host scheme-claim + cross-instance key-uniqueness guard)
+IApiKeyClientResolver  (Configuration / Dynamic / Caching / Composite / SourceDispatching)
+IApiKeyDenylist  (per-request revocation consult, boot-hydrated, fail-closed)
 ```
 
 ## Dynamic API key resolution
@@ -212,14 +223,43 @@ builder.AddAuthentication(auth => auth
         .AddTransport(ApiKeyTransports.XApiKey)
         .AddResolver<DatabaseApiKeyResolver>(caching => {
             caching.SuccessCacheDuration = TimeSpan.FromMinutes(5);
+            // Negative (miss) caching is OFF by default — enabling it can reject a
+            // newly provisioned or just-rotated key for up to NotFoundCacheDuration.
+            caching.EnableNegativeCaching = true;
             caching.NotFoundCacheDuration = TimeSpan.FromSeconds(30);
         })));
 ```
 
+Cache entries are keyed by the routing dimension (`X-Api-Source`) together with the header and a hash of the key, so a result cached for one store never satisfies a lookup for another.
+
+## Multi-store routing
+
+A single ApiKey provider can front several key sets. A *configured* (static) set is cheap and participates in the blind fallback scan; a *dynamic* set registered with `AddDynamicStore<TResolver>(name)` is **addressable-only** — reached solely by an explicit `X-Api-Source` header carrying the store's opaque reference, and never blind-scanned (the CPU-DoS guarantee, ADR-0020 §5/§6). When addressable stores exist and a Bearer credential arrives with no `X-Api-Source`, the handler returns a non-descript **`400`** (missing routing signal) — it never enumerates valid sources nor scans expensive stores.
+
+## Revocation
+
+A per-request denylist (`IApiKeyDenylist`) is consulted on every resolution **after** the cache, so a revoked credential is rejected even within a cache entry's TTL (ADR-0020 §8). It is hydrated at boot from any registered `IRevokedCredentialProvider` and kept current by `CredentialRevoked` auth-bus events.
+
+The hydrator is **fail-closed**: if a provider faults at startup (the denylist may be missing revoked credentials), ApiKey authentication fails closed with a retryable **`503`**, a `Critical` log is emitted, and the `apikey-revocation` health check reports `Unhealthy` — until hydration succeeds. To deliberately serve with a possibly-incomplete denylist (availability over the revocation guarantee), set the off-by-default escape hatch:
+
+```json
+{ "Cirreum": { "Authentication": { "Providers": { "ApiKey": {
+  "Revocation": { "AllowFaultedDenylist": true }
+}}}}}
+```
+
+> ⚠ With `AllowFaultedDenylist` set, a revoked credential may authenticate until the live revocation event stream catches up; the health check stays `Degraded`.
+
+The in-memory denylist is bounded by `Revocation:MaxDenylistEntries` (default 1,000,000). It evicts an entry only once the revoked credential's own expiry has passed (never to free space — that would un-revoke a live credential); at the cap it refuses further revocations with a `Critical` log rather than silently dropping. For populations beyond the cap, plug a scale-out `IApiKeyDenylist` backed by the authoritative store.
+
 ## Security considerations
 
 - **Constant-time comparison** — Key validation uses `CryptographicOperations.FixedTimeEquals` to prevent timing attacks
-- **Key storage** — Never commit API keys to source control; use Azure Key Vault or similar secret management
+- **Self-describing hashing, fail-closed** — Managed keys are stored as PHC-style `{algorithm}$…` and verified by single-algorithm dispatch on the encoded tag; a non-self-describing stored value is rejected, foreclosing both the legacy bare-hash fallback and algorithm confusion
+- **Strength at issuance** — Configured keys must clear a startup strength floor (length + 112-bit entropy) unless `AllowWeakConfiguredKeys`; managed keys are 256-bit by construction. Entropy is never tested against a presented credential
+- **Key storage** — Never commit API keys to source control; provide configured keys via Key Vault (`ConnectionStrings:{InstanceName}`), and persist only hashes for managed keys
+- **Fail-closed revocation** — The denylist is consulted every request after the cache; a faulted boot hydration fails authentication closed (`503`) with a health-check signal unless `AllowFaultedDenylist` is set
+- **No claim shadowing** — Custom client claims cannot override the reserved framework claim types (`client_type`, `scope`, name, role, identifier)
 - **Key rotation** — Plan for key rotation by supporting multiple active keys during transition periods
 - **Transport security** — Always use HTTPS to protect keys in transit
 - **Least privilege** — Assign minimum required roles to each client
@@ -233,7 +273,10 @@ Authenticated requests receive the following claims:
 | `ClaimTypes.NameIdentifier` | `ClientId` |
 | `ClaimTypes.Name` | `ClientName` |
 | `ClaimTypes.Role` | Each configured role |
+| `scope` | Each granted scope (per-key overrides) |
 | `client_type` | `api_key` |
+
+A client may carry additional custom claims, but any custom claim whose type collides with a reserved type above (`client_type`, `scope`, name, role, identifier) is dropped with a warning — it cannot shadow the values the handler emits.
 
 The ASP.NET authentication scheme that authenticated the request (`ApiKey:Bearer`, `ApiKey:X-Api-Key`, etc.) is carried on `AuthenticationTicket.AuthenticationScheme` — no `auth_scheme` claim side-channel.
 
