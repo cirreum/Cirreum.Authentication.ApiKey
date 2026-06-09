@@ -62,7 +62,9 @@ public sealed class CompositeApiKeyClientResolver : IApiKeyClientResolver {
 				continue;
 			}
 
-			var result = await resolver.ResolveAsync(providedKey, context, cancellationToken);
+			// A throwing resolver fails closed to a miss (never a 500); cancellation propagates.
+			var result = await ApiKeyResolverGuard.SafeResolveAsync(
+				resolver, providedKey, context, _logger, cancellationToken);
 
 			if (result.IsSuccess) {
 				if (_logger.IsEnabled(LogLevel.Debug)) {
@@ -75,14 +77,16 @@ public sealed class CompositeApiKeyClientResolver : IApiKeyClientResolver {
 				return result;
 			}
 
-			// If it's a hard failure (not just "not found"), stop and return it
-			if (!result.IsSuccess && result.FailureReason != "API key not found") {
+			// NotFound is the only soft outcome — try the next resolver. Every other outcome (Expired,
+			// Failed, MissingRoutingSignal) is a definitive answer for this credential: stop and return it.
+			// Branch on the typed Outcome, never on the free-text FailureReason.
+			if (result.Outcome != ApiKeyResolveOutcome.NotFound) {
 				if (_logger.IsEnabled(LogLevel.Debug)) {
 					_logger.LogDebug(
-						"API key validation failed at resolver {ResolverIndex} ({ResolverType}): {Reason}",
+						"API key resolution stopped at resolver {ResolverIndex} ({ResolverType}): {Outcome}",
 						i,
 						resolver.GetType().Name,
-						result.FailureReason);
+						result.Outcome);
 				}
 				return result;
 			}

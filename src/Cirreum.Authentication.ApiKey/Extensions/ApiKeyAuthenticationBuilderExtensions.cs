@@ -72,17 +72,17 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		//    populates the client registry, and registers the schemes the instances use.
 		var providerSettings = BindConfiguredInstances(builder);
 
-		// 1b. Bind the conformance profile + validation knobs and register the crypto primitives
-		//     (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
+		// 1b. Bind the validation knobs (the two-forms strength + hashing options) and register the crypto
+		//     primitives (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
 		RegisterValidationServices(services, builder.Configuration);
 
 		// 1c. Register the source catalog and any named dynamic stores (ADR-0020 §4/§6). Each store's
 		//     resolver is registered in DI keyed by its derived SourceRef for addressable dispatch.
 		RegisterSourceCatalog(services, options);
 
-		// 1d. Register the revocation denylist, the CredentialRevoked auth-event handler, and the
-		//     boot-time hydrator (ADR-0020 §8).
-		RegisterRevocation(services);
+		// 1d. Register the revocation denylist, the CredentialRevoked auth-event handler, the boot-time
+		//     hydrator + its fail-closed readiness gate, and the revocation health check (ADR-0020 §8).
+		RegisterRevocation(services, builder.Configuration);
 
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
 		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
@@ -154,11 +154,21 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		}
 	}
 
-	private static void RegisterRevocation(IServiceCollection services) {
+	private static void RegisterRevocation(IServiceCollection services, IConfiguration configuration) {
+		services.Configure<ApiKeyRevocationOptions>(
+			configuration.GetSection("Cirreum:Authentication:Providers:ApiKey:Revocation"));
+
 		services.TryAddSingleton<IApiKeyDenylist, ApiKeyDenylist>();
+		services.TryAddSingleton<ApiKeyRevocationReadiness>();
 		services.TryAddEnumerable(
 			ServiceDescriptor.Singleton<IAuthenticationEventHandler<CredentialRevoked>, ApiKeyCredentialRevokedHandler>());
 		services.AddHostedService<ApiKeyRevocationHydrator>();
+
+		// Surface denylist authority so an orchestrator can pull an instance whose revocation state is
+		// not trustworthy (fail-closed visibility for the hydration gate above).
+		services.AddHealthChecks().AddCheck<ApiKeyRevocationHealthCheck>(
+			ApiKeyRevocationHealthCheck.Name,
+			tags: ["apikey", "authentication", "revocation"]);
 	}
 
 	private static ApiKeySourceCatalog GetOrAddCatalog(IServiceCollection services) {
@@ -246,6 +256,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 				scanFactory(sp),
 				sp.GetRequiredService<IApiKeySourceCatalog>(),
 				sp.GetRequiredService<IApiKeyDenylist>(),
+				sp.GetRequiredService<ApiKeyRevocationReadiness>(),
 				sp,
 				sp.GetRequiredService<ILogger<SourceDispatchingApiKeyClientResolver>>()));
 	}

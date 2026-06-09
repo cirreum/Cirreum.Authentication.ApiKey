@@ -50,8 +50,8 @@ public record StoredApiKey {
 	// ---- Per-key overrides (ADR-0020 §9) — captured at key creation, may only tighten ----------
 
 	/// <summary>
-	/// Gets the time this key was created. Required to enforce <see cref="MaxKeyAge"/> /
-	/// the conformance profile's cryptoperiod (NIST SP 800-57).
+	/// Gets the time this key was created. Required to enforce <see cref="MaxKeyAge"/>
+	/// (the NIST SP 800-57 cryptoperiod).
 	/// </summary>
 	public DateTimeOffset? CreatedAt { get; init; }
 

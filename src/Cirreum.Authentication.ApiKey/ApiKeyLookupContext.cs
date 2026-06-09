@@ -17,7 +17,7 @@ using Cirreum.AuthenticationProvider;
 /// header (ADR-0020 §6), or <see langword="null"/> when no store was addressed. A resolver over a
 /// shared backing can scope its lookup to this source (e.g. <c>WHERE store_ref = @ref</c>).</param>
 /// <param name="source">The resolved <see cref="IApiKeySource"/> when an addressable store was routed to
-/// (carries the store's conformance profile for per-store validation), or <see langword="null"/>.</param>
+/// (lets the store's resolver scope its lookup), or <see langword="null"/>.</param>
 public sealed class ApiKeyLookupContext(
 	CredentialTransport transport,
 	string headerName,
@@ -40,8 +40,8 @@ public sealed class ApiKeyLookupContext(
 	public string? MatchedSource { get; } = matchedSource;
 
 	/// <summary>
-	/// Gets the resolved <see cref="IApiKeySource"/> for an addressed store (carrying its conformance
-	/// profile), or <see langword="null"/> when no addressable store was routed to.
+	/// Gets the resolved <see cref="IApiKeySource"/> for an addressed store (so the store's resolver can
+	/// scope its lookup), or <see langword="null"/> when no addressable store was routed to.
 	/// </summary>
 	public IApiKeySource? Source { get; } = source;
 

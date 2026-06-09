@@ -51,6 +51,10 @@ public class ApiKeyAuthenticationRegistrar
 	// Bound once in Register; read per-instance in AddAuthenticationHandler for the Form-1 strength check.
 	private ApiKeyValidationOptions _validation = new();
 
+	// The per-host provider state (resolved once in Register), carrying the cross-instance key-uniqueness
+	// guard. Per-host rather than process-static so parallel hosts in one process stay isolated.
+	private ApiKeyProviderState _state = new();
+
 	/// <inheritdoc/>
 	public override void ValidateSettings(ApiKeyAuthenticationInstanceSettings settings) {
 
@@ -95,8 +99,8 @@ public class ApiKeyAuthenticationRegistrar
 		// Stash provider-level state for the dynamic-resolver path. Done unconditionally —
 		// even with zero Instances, the AddApiKey(...) verb may still need the prefix when
 		// it registers the ApiKey:Bearer scheme for a declared transport.
-		var state = ApiKeySchemeRegistration.GetOrAddState(services);
-		state.BearerPrefix = providerSettings.BearerPrefix;
+		this._state = ApiKeySchemeRegistration.GetOrAddState(services);
+		this._state.BearerPrefix = providerSettings.BearerPrefix;
 
 		// The two-forms strength knobs (Form-1 floor + AllowWeakConfiguredKeys), enforced per instance below.
 		this._validation = configuration
@@ -153,7 +157,7 @@ public class ApiKeyAuthenticationRegistrar
 			}
 		}
 
-		ApiKeyValidation.ValidateApiKeyUniqueness(apiKey, key, settings.ClientId);
+		this._state.RegisterUniqueKey(apiKey, key, settings.ClientId);
 
 		var clientName = string.IsNullOrWhiteSpace(settings.ClientName)
 			? settings.ClientId

@@ -1,8 +1,8 @@
 namespace Cirreum.Authentication.ApiKey;
 
 /// <summary>
-/// A registered API key source (a "key set" — ADR-0020 §4): a backing store of keys with its own
-/// conformance profile and an opaque, derived <see cref="SourceRef"/> for routing.
+/// A registered API key source (a "key set" — ADR-0020 §4): a backing store of keys with an opaque,
+/// derived <see cref="SourceRef"/> for routing.
 /// </summary>
 public interface IApiKeySource {
 

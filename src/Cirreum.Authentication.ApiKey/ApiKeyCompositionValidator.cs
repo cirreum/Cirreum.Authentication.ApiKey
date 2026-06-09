@@ -13,9 +13,8 @@ internal static class ApiKeyCompositionValidator {
 
 	/// <summary>
 	/// Validates the ApiKey composition. Throws <see cref="InvalidOperationException"/> when the legacy
-	/// <c>AddResolver(...)</c> path (a blind-scanned cheap resolver) is used with a hardened profile or
-	/// PBKDF2 hashing — which would expose a CPU-DoS through the fallback scan (use
-	/// <c>AddDynamicStore(...)</c> instead).
+	/// <c>AddResolver(...)</c> path (a blind-scanned cheap resolver) is used with PBKDF2 hashing — which
+	/// would expose a CPU-DoS through the fallback scan (use <c>AddDynamicStore(...)</c> instead).
 	/// </summary>
 	/// <param name="options">The composed ApiKey options (legacy resolver + named dynamic stores).</param>
 	/// <param name="configuration">The application configuration.</param>

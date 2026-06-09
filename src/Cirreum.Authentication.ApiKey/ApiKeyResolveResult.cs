@@ -6,9 +6,15 @@ namespace Cirreum.Authentication.ApiKey;
 public sealed record ApiKeyResolveResult {
 
 	/// <summary>
+	/// Gets the typed outcome of the resolution. The composite chain branches on this, not on
+	/// <see cref="FailureReason"/>.
+	/// </summary>
+	public ApiKeyResolveOutcome Outcome { get; private init; }
+
+	/// <summary>
 	/// Gets whether the resolution was successful.
 	/// </summary>
-	public bool IsSuccess { get; private init; }
+	public bool IsSuccess => this.Outcome == ApiKeyResolveOutcome.Success;
 
 	/// <summary>
 	/// Gets the resolved client when successful; otherwise, <see langword="null"/>.
@@ -17,6 +23,7 @@ public sealed record ApiKeyResolveResult {
 
 	/// <summary>
 	/// Gets the reason for failure when unsuccessful; otherwise, <see langword="null"/>.
+	/// Diagnostic text only — never branch control flow on it (use <see cref="Outcome"/>).
 	/// </summary>
 	public string? FailureReason { get; private init; }
 
@@ -24,7 +31,7 @@ public sealed record ApiKeyResolveResult {
 	/// Gets whether the failure is a missing routing signal (no <c>X-Api-Source</c> while addressable
 	/// stores exist), which the handler maps to a non-descript <c>400</c> rather than a <c>401</c>.
 	/// </summary>
-	public bool RequiresRouting { get; private init; }
+	public bool RequiresRouting => this.Outcome == ApiKeyResolveOutcome.MissingRoutingSignal;
 
 	private ApiKeyResolveResult() { }
 
@@ -35,28 +42,30 @@ public sealed record ApiKeyResolveResult {
 	/// <returns>A successful result containing the client.</returns>
 	public static ApiKeyResolveResult Success(ApiKeyClient client) =>
 		new() {
-			IsSuccess = true,
+			Outcome = ApiKeyResolveOutcome.Success,
 			Client = client ?? throw new ArgumentNullException(nameof(client))
 		};
 
 	/// <summary>
-	/// Creates a failed resolution result with a reason.
+	/// Creates a failed resolution result with a reason. A definitive failure for this credential —
+	/// the composite chain stops here.
 	/// </summary>
 	/// <param name="reason">The reason for failure.</param>
 	/// <returns>A failed result with the specified reason.</returns>
 	public static ApiKeyResolveResult Failed(string reason) =>
 		new() {
-			IsSuccess = false,
+			Outcome = ApiKeyResolveOutcome.Failed,
 			FailureReason = reason ?? throw new ArgumentNullException(nameof(reason))
 		};
 
 	/// <summary>
-	/// Creates a result indicating the key was not found.
+	/// Creates a result indicating the key was not found. The only soft outcome — the composite chain
+	/// continues to the next resolver.
 	/// </summary>
 	/// <returns>A failed result indicating not found.</returns>
 	public static ApiKeyResolveResult NotFound() =>
 		new() {
-			IsSuccess = false,
+			Outcome = ApiKeyResolveOutcome.NotFound,
 			FailureReason = "API key not found"
 		};
 
@@ -66,7 +75,7 @@ public sealed record ApiKeyResolveResult {
 	/// <returns>A failed result indicating expiration.</returns>
 	public static ApiKeyResolveResult Expired() =>
 		new() {
-			IsSuccess = false,
+			Outcome = ApiKeyResolveOutcome.Expired,
 			FailureReason = "API key has expired"
 		};
 
@@ -78,8 +87,19 @@ public sealed record ApiKeyResolveResult {
 	/// </summary>
 	public static ApiKeyResolveResult MissingRoutingSignal() =>
 		new() {
-			IsSuccess = false,
-			RequiresRouting = true,
+			Outcome = ApiKeyResolveOutcome.MissingRoutingSignal,
 			FailureReason = "Missing API key routing signal"
+		};
+
+	/// <summary>
+	/// Creates a result indicating the revocation denylist is not authoritative yet (boot hydration
+	/// incomplete or faulted with the escape hatch off). The handler maps this to a non-descript
+	/// <c>503</c> — the credential was never evaluated; we cannot prove it is not revoked, so we fail
+	/// closed (ADR-0020 §8).
+	/// </summary>
+	public static ApiKeyResolveResult RevocationUnavailable() =>
+		new() {
+			Outcome = ApiKeyResolveOutcome.RevocationUnavailable,
+			FailureReason = "API key revocation state is temporarily unavailable"
 		};
 }

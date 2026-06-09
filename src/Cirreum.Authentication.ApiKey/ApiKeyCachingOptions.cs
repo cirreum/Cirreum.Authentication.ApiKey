@@ -19,11 +19,14 @@ public sealed class ApiKeyCachingOptions {
 	public TimeSpan NotFoundCacheDuration { get; set; } = TimeSpan.FromSeconds(30);
 
 	/// <summary>
-	/// Gets or sets whether to cache "not found" results (negative caching).
-	/// Helps prevent repeated database lookups for invalid keys.
-	/// Default is <see langword="true"/>.
+	/// Gets or sets whether to cache "not found" results (negative caching). Default is
+	/// <see langword="false"/>: negative caching trades a brief denial-of-correct-credential window
+	/// for fewer backing-store lookups, so it is opt-in. When enabled, a miss is cached per
+	/// (routing dimension, header, key) for <see cref="NotFoundCacheDuration"/>; a newly provisioned
+	/// or just-rotated key can be rejected for up to that window. Enable only when the backing store
+	/// is under load from invalid keys and a short staleness window is acceptable.
 	/// </summary>
-	public bool EnableNegativeCaching { get; set; } = true;
+	public bool EnableNegativeCaching { get; set; } = false;
 
 	/// <summary>
 	/// Gets or sets the maximum number of entries to cache.

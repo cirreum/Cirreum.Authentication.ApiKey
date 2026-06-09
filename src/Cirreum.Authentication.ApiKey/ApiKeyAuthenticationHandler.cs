@@ -40,13 +40,29 @@ public class ApiKeyAuthenticationHandler(
 
 	private const string BearerPrefix = "Bearer ";
 
+	/// <summary>
+	/// Claim types the handler emits itself from the resolved client's first-class fields. A custom
+	/// <see cref="ApiKeyClient.Claims"/> entry for one of these is dropped (with a warning) so a
+	/// resolver / store cannot shadow identity, role, scope, or the credential-type marker an
+	/// authorization policy relies on (SessionTicket got the same guard as M-2).
+	/// </summary>
+	private static readonly HashSet<string> ReservedClaimTypes = new(StringComparer.OrdinalIgnoreCase) {
+		ClaimTypes.NameIdentifier,
+		ClaimTypes.Name,
+		ClaimTypes.Role,
+		"client_type",
+		"scope",
+	};
+
 	private bool _missingRoutingSignal;
+	private bool _revocationUnavailable;
 
 	/// <inheritdoc/>
 	protected override async Task<AuthenticateResult> HandleAuthenticateAsync() {
 
 		// Reset per-invocation state (the handler instance may be reused within a request).
 		this._missingRoutingSignal = false;
+		this._revocationUnavailable = false;
 
 		var transport = this.Options.Transport;
 		string? providedKey;
@@ -101,6 +117,13 @@ public class ApiKeyAuthenticationHandler(
 			return AuthenticateResult.Fail(result.FailureReason ?? "Bad request");
 		}
 
+		if (result.Outcome == ApiKeyResolveOutcome.RevocationUnavailable) {
+			// Denylist not authoritative → fail closed with a 503 (retry), not a 401: the credential was
+			// never evaluated, so this is not a credential rejection (see HandleChallengeAsync).
+			this._revocationUnavailable = true;
+			return AuthenticateResult.Fail(result.FailureReason ?? "Service unavailable");
+		}
+
 		if (!result.IsSuccess || result.Client is null) {
 			if (this.Logger.IsEnabled(LogLevel.Warning)) {
 				this.Logger.LogWarning(
@@ -140,6 +163,17 @@ public class ApiKeyAuthenticationHandler(
 
 		if (client.Claims is not null) {
 			foreach (var (claimType, claimValue) in client.Claims) {
+				if (ReservedClaimTypes.Contains(claimType)) {
+					// A custom claim must never shadow a framework claim the handler emits — dropping it
+					// keeps identity/role/scope/client_type authoritative for authorization decisions.
+					if (this.Logger.IsEnabled(LogLevel.Warning)) {
+						this.Logger.LogWarning(
+							"API key client {ClientId} declared a reserved claim '{ClaimType}'; ignoring it.",
+							client.ClientId,
+							claimType);
+					}
+					continue;
+				}
 				claims.Add(new Claim(claimType, claimValue));
 			}
 		}
@@ -165,6 +199,14 @@ public class ApiKeyAuthenticationHandler(
 		if (this._missingRoutingSignal) {
 			// Non-descript 400: no WWW-Authenticate, nothing that enumerates valid sources (ADR-0020 §5).
 			this.Response.StatusCode = 400;
+			return Task.CompletedTask;
+		}
+
+		if (this._revocationUnavailable) {
+			// Fail closed, but retryable: the denylist is not authoritative yet (ADR-0020 §8). No
+			// WWW-Authenticate — this is not a credential challenge.
+			this.Response.StatusCode = 503;
+			this.Response.Headers.RetryAfter = "5";
 			return Task.CompletedTask;
 		}
 

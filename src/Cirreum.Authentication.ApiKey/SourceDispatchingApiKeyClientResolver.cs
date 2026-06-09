@@ -17,6 +17,7 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 	private readonly IApiKeyClientResolver _scan;
 	private readonly IApiKeySourceCatalog _catalog;
 	private readonly IApiKeyDenylist _denylist;
+	private readonly ApiKeyRevocationReadiness _readiness;
 	private readonly IServiceProvider _services;
 	private readonly ILogger<SourceDispatchingApiKeyClientResolver> _logger;
 	private readonly bool _hasAddressableStores;
@@ -25,12 +26,14 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 		IApiKeyClientResolver scan,
 		IApiKeySourceCatalog catalog,
 		IApiKeyDenylist denylist,
+		ApiKeyRevocationReadiness readiness,
 		IServiceProvider services,
 		ILogger<SourceDispatchingApiKeyClientResolver> logger) {
 
 		this._scan = scan;
 		this._catalog = catalog;
 		this._denylist = denylist;
+		this._readiness = readiness;
 		this._services = services;
 		this._logger = logger;
 		this._hasAddressableStores = catalog.Sources.Any(s => s.IsAddressableOnly);
@@ -44,6 +47,19 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 		string providedKey,
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken = default) {
+
+		// Revocation gate (ADR-0020 §8): if the denylist is not authoritative yet — boot hydration is
+		// incomplete or faulted with AllowFaultedDenylist off — fail closed before evaluating any
+		// credential. We cannot prove the presented key is not revoked, so authenticating it would risk
+		// honoring a revoked credential. The handler maps this to a 503 (retry), not a 401.
+		if (!this._readiness.IsReady) {
+			if (this._logger.IsEnabled(LogLevel.Warning)) {
+				this._logger.LogWarning(
+					"ApiKey revocation denylist is not authoritative; failing authentication closed (503).");
+			}
+
+			return ApiKeyResolveResult.RevocationUnavailable();
+		}
 
 		// Addressable dispatch: an explicit X-Api-Source routes O(1) to that store's resolver.
 		if (!string.IsNullOrEmpty(context.MatchedSource)) {
@@ -61,16 +77,19 @@ internal sealed class SourceDispatchingApiKeyClientResolver : IApiKeyClientResol
 				return ApiKeyResolveResult.Failed("API key source is not resolvable.");
 			}
 
-			// Enrich the context with the resolved source so the store's resolver/validator enforce
-			// THIS store's conformance profile (not the provider-global one).
+			// Enrich the context with the resolved source so the store's resolver/validator scope the
+			// lookup to THIS store.
 			var routedContext = new ApiKeyLookupContext(
 				context.Transport, context.HeaderName, context.Headers, context.MatchedSource, source);
 
-			return this.RejectIfRevoked(await resolver.ResolveAsync(providedKey, routedContext, cancellationToken));
+			// A throwing store resolver fails closed to a miss (never a 500); cancellation propagates.
+			return this.RejectIfRevoked(await ApiKeyResolverGuard.SafeResolveAsync(
+				resolver, providedKey, routedContext, this._logger, cancellationToken));
 		}
 
 		// No routing signal: blind-scan the cheap (static) path only. Addressable stores are excluded.
-		var result = await this._scan.ResolveAsync(providedKey, context, cancellationToken);
+		var result = await ApiKeyResolverGuard.SafeResolveAsync(
+			this._scan, providedKey, context, this._logger, cancellationToken);
 		if (result.IsSuccess) {
 			return this.RejectIfRevoked(result);
 		}
