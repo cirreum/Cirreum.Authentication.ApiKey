@@ -13,17 +13,19 @@ using Cirreum.AuthenticationProvider;
 /// when <paramref name="transport"/> is <see cref="CredentialTransport.BearerAuthorizationHeader"/>.</param>
 /// <param name="headers">All non-credential request headers, for filtering / lookup
 /// optimization. Excludes the credential value for security.</param>
-/// <param name="matchedSource">The resolved store reference from the <c>X-Api-Source</c> routing
-/// header (ADR-0020 §6), or <see langword="null"/> when no store was addressed. A resolver over a
-/// shared backing can scope its lookup to this source (e.g. <c>WHERE store_ref = @ref</c>).</param>
-/// <param name="source">The resolved <see cref="IApiKeySource"/> when an addressable store was routed to
-/// (lets the store's resolver scope its lookup), or <see langword="null"/>.</param>
+/// <param name="requestedSource">The raw store reference supplied in the <c>X-Api-Source</c> routing
+/// header — what the client <em>requested</em>, not a confirmed match — or <see langword="null"/> when
+/// no store was addressed. The dispatcher resolves it against the source catalog; a resolver over a
+/// shared backing can scope its lookup to it (e.g. <c>WHERE store_ref = @ref</c>).</param>
+/// <param name="resolvedSource">The <see cref="IApiKeySource"/> the dispatcher resolved
+/// <paramref name="requestedSource"/> to (an addressed store), letting the store's resolver scope its
+/// lookup, or <see langword="null"/> when no addressable store was routed to.</param>
 public sealed class ApiKeyLookupContext(
 	CredentialTransport transport,
 	string headerName,
 	IReadOnlyDictionary<string, string> headers,
-	string? matchedSource = null,
-	IApiKeySource? source = null) {
+	string? requestedSource = null,
+	IApiKeySource? resolvedSource = null) {
 
 	private readonly IReadOnlyDictionary<string, string> _headers = headers ?? new Dictionary<string, string>();
 
@@ -33,17 +35,19 @@ public sealed class ApiKeyLookupContext(
 	public CredentialTransport Transport { get; } = transport;
 
 	/// <summary>
-	/// Gets the resolved store reference from the <c>X-Api-Source</c> routing header (ADR-0020 §6),
-	/// or <see langword="null"/> when no store was addressed. A routing hint only — the resolver still
-	/// performs full credential validation; never branch a trust decision on it.
+	/// Gets the raw store reference the client supplied in the <c>X-Api-Source</c> routing header — what
+	/// was <em>requested</em>, not a confirmed match — or <see langword="null"/> when no store was
+	/// addressed. A routing hint only: the resolver still performs full credential validation; never
+	/// branch a trust decision on it.
 	/// </summary>
-	public string? MatchedSource { get; } = matchedSource;
+	public string? RequestedSource { get; } = requestedSource;
 
 	/// <summary>
-	/// Gets the resolved <see cref="IApiKeySource"/> for an addressed store (so the store's resolver can
-	/// scope its lookup), or <see langword="null"/> when no addressable store was routed to.
+	/// Gets the <see cref="IApiKeySource"/> the dispatcher resolved <see cref="RequestedSource"/> to (an
+	/// addressed store, so the store's resolver can scope its lookup), or <see langword="null"/> when no
+	/// addressable store was routed to.
 	/// </summary>
-	public IApiKeySource? Source { get; } = source;
+	public IApiKeySource? ResolvedSource { get; } = resolvedSource;
 
 	/// <summary>
 	/// Gets the HTTP header name the credential arrived on

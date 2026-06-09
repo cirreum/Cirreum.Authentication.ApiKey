@@ -52,8 +52,8 @@ public sealed class CachingApiKeyClientResolverTests {
 		var inner = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("a")));
 		var caching = Caching(inner);
 
-		await caching.ResolveAsync("k", TestResolvers.Context(matchedSource: "src-a"));
-		await caching.ResolveAsync("k", TestResolvers.Context(matchedSource: "src-b"));
+		await caching.ResolveAsync("k", TestResolvers.Context(requestedSource: "src-a"));
+		await caching.ResolveAsync("k", TestResolvers.Context(requestedSource: "src-b"));
 
 		inner.Calls.Should().Be(2, "the same key under a different store must not hit the other store's cache entry");
 	}
@@ -63,8 +63,8 @@ public sealed class CachingApiKeyClientResolverTests {
 		var inner = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("a")));
 		var caching = Caching(inner);
 
-		await caching.ResolveAsync("k", TestResolvers.Context(matchedSource: "src-a"));
-		await caching.ResolveAsync("k", TestResolvers.Context(matchedSource: "src-a"));
+		await caching.ResolveAsync("k", TestResolvers.Context(requestedSource: "src-a"));
+		await caching.ResolveAsync("k", TestResolvers.Context(requestedSource: "src-a"));
 
 		inner.Calls.Should().Be(1);
 	}

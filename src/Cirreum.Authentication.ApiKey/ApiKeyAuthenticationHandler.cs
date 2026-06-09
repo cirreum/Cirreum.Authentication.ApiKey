@@ -96,14 +96,14 @@ public class ApiKeyAuthenticationHandler(
 			return AuthenticateResult.Fail($"Unsupported ApiKey transport: {transport}");
 		}
 
-		var matchedSource = this.Request.Headers.TryGetValue(ApiKeyHeaders.Source, out var sourceValues)
+		var requestedSource = this.Request.Headers.TryGetValue(ApiKeyHeaders.Source, out var sourceValues)
 			? sourceValues.FirstOrDefault()
 			: null;
-		if (string.IsNullOrWhiteSpace(matchedSource)) {
-			matchedSource = null;
+		if (string.IsNullOrWhiteSpace(requestedSource)) {
+			requestedSource = null;
 		}
 
-		var context = this.BuildLookupContext(transport, headerName, matchedSource);
+		var context = this.BuildLookupContext(transport, headerName, requestedSource);
 
 		var result = await clientResolver.ResolveAsync(
 			providedKey,
@@ -236,7 +236,7 @@ public class ApiKeyAuthenticationHandler(
 	private ApiKeyLookupContext BuildLookupContext(
 		CredentialTransport transport,
 		string credentialHeader,
-		string? matchedSource) {
+		string? requestedSource) {
 
 		var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -250,7 +250,7 @@ public class ApiKeyAuthenticationHandler(
 			}
 		}
 
-		return new ApiKeyLookupContext(transport, credentialHeader, headers, matchedSource);
+		return new ApiKeyLookupContext(transport, credentialHeader, headers, requestedSource);
 	}
 
 }

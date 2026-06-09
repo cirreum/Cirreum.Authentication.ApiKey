@@ -72,7 +72,7 @@ public sealed class CachingApiKeyClientResolver(
 		CancellationToken cancellationToken = default) {
 
 		var headerName = context.HeaderName;
-		var cacheKey = GenerateCacheKey(context.MatchedSource, headerName, providedKey);
+		var cacheKey = GenerateCacheKey(context.RequestedSource, headerName, providedKey);
 
 		// Try to get from cache
 		if (_cache.TryGetValue(cacheKey, out var cached)) {
@@ -137,15 +137,15 @@ public sealed class CachingApiKeyClientResolver(
 	/// header name, and the provided key. Uses a SHA256 hash to avoid storing raw keys in cache.
 	/// </summary>
 	/// <remarks>
-	/// The <paramref name="matchedSource"/> is part of the lookup identity: the same key resolves to a
+	/// The <paramref name="requestedSource"/> is part of the lookup identity: the same key resolves to a
 	/// different client (or to a miss) depending on which store it is routed to, so a result cached
 	/// under one routing dimension must never satisfy a lookup under another — otherwise a negative
 	/// (miss) entry from store A could wrongly reject a key that is valid in store B.
 	/// </remarks>
-	private static string GenerateCacheKey(string? matchedSource, string headerName, string providedKey) {
+	private static string GenerateCacheKey(string? requestedSource, string headerName, string providedKey) {
 		// Length-prefix each segment so distinct (source, header) tuples can never collide via a
 		// delimiter that also appears inside a value.
-		var combined = $"{matchedSource?.Length ?? -1}:{matchedSource}:{headerName.Length}:{headerName}:{providedKey}";
+		var combined = $"{requestedSource?.Length ?? -1}:{requestedSource}:{headerName.Length}:{headerName}:{providedKey}";
 		var bytes = Encoding.UTF8.GetBytes(combined);
 		var hash = SHA256.HashData(bytes);
 		return $"{CacheKeyPrefix}{Convert.ToBase64String(hash)}";

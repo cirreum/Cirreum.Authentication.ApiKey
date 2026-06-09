@@ -8,10 +8,10 @@ internal static class TestResolvers {
 	public static ApiKeyLookupContext Context(
 		string headerName = "Authorization",
 		CredentialTransport transport = CredentialTransport.BearerAuthorizationHeader,
-		string? matchedSource = null,
-		IApiKeySource? source = null,
+		string? requestedSource = null,
+		IApiKeySource? resolvedSource = null,
 		IReadOnlyDictionary<string, string>? headers = null) =>
-		new(transport, headerName, headers ?? new Dictionary<string, string>(), matchedSource, source);
+		new(transport, headerName, headers ?? new Dictionary<string, string>(), requestedSource, resolvedSource);
 
 	public static ApiKeyClient Client(string clientId = "client-1") =>
 		new() { ClientId = clientId, ClientName = clientId };

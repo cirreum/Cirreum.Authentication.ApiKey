@@ -105,7 +105,7 @@ public sealed class SourceDispatchingApiKeyClientResolverTests {
 		var scan = new TestResolvers.Stub(ApiKeyResolveResult.NotFound());
 		var dispatcher = Dispatcher(scan, CatalogWithDynamicStore(), NewDenylist(), Ready(), services);
 
-		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(matchedSource: StoreRef));
+		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(requestedSource: StoreRef));
 
 		result.IsSuccess.Should().BeTrue();
 		result.Client!.ClientId.Should().Be("routed");
@@ -117,7 +117,7 @@ public sealed class SourceDispatchingApiKeyClientResolverTests {
 		var scan = new TestResolvers.Stub(ApiKeyResolveResult.NotFound());
 		var dispatcher = Dispatcher(scan, CatalogWithDynamicStore(), NewDenylist(), Ready());
 
-		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(matchedSource: "UNKNOWNREF000000"));
+		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(requestedSource: "UNKNOWNREF000000"));
 
 		result.Outcome.Should().Be(ApiKeyResolveOutcome.NotFound, "an unknown source never enumerates valid sources");
 	}
@@ -130,7 +130,7 @@ public sealed class SourceDispatchingApiKeyClientResolverTests {
 		var scan = new TestResolvers.Stub(ApiKeyResolveResult.NotFound());
 		var dispatcher = Dispatcher(scan, CatalogWithDynamicStore(), NewDenylist(), Ready(), services);
 
-		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(matchedSource: StoreRef));
+		var result = await dispatcher.ResolveAsync("k", TestResolvers.Context(requestedSource: StoreRef));
 
 		result.Outcome.Should().Be(ApiKeyResolveOutcome.NotFound, "a throwing store fails closed to a miss, not a 500");
 	}

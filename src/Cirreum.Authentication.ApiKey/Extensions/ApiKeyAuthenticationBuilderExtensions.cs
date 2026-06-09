@@ -166,9 +166,11 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 		// Surface denylist authority so an orchestrator can pull an instance whose revocation state is
 		// not trustworthy (fail-closed visibility for the hydration gate above).
+		// We provide additional tags, but the "ready" tag effects the readiness of the application
+		// if the denylist is not healthy.
 		services.AddHealthChecks().AddCheck<ApiKeyRevocationHealthCheck>(
 			ApiKeyRevocationHealthCheck.Name,
-			tags: ["apikey", "authentication", "revocation"]);
+			tags: ["ready", "apikey", "authentication", "revocation"]);
 	}
 
 	private static ApiKeySourceCatalog GetOrAddCatalog(IServiceCollection services) {
