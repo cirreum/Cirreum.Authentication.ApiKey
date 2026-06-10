@@ -59,25 +59,24 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		var options = new ApiKeyOptions();
 		configure?.Invoke(options);
 
-		// 1. Bind + register configured instances (appsettings). The registrar stashes
-		//    BearerPrefix, registers ConfigurationApiKeyClientResolver as a concrete type,
-		//    populates the client registry, and registers the schemes the instances use.
-		BindConfiguredInstances(builder);
+		// 1. Bind the provider settings once (BearerPrefix + Instances + the Validation / Revocation
+		//    sub-objects) and register the configured instances via the registrar.
+		var providerSettings = BindConfiguredInstances(builder);
 
-		// 1b. Bind the validation knobs (the two-forms strength + hashing options) and register the crypto
-		//     primitives (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
-		RegisterValidationServices(services, builder.Configuration);
+		// 1b. Register the validation options (from the bound settings) and the crypto primitives
+		//     (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
+		RegisterValidationServices(services, providerSettings?.Validation);
 
 		// 1c. Register the source catalog, the named dynamic sources (keyed by derived SourceRef for
 		//     addressable dispatch), and the default dynamic source (ADR-0020 §4/§6).
 		RegisterSources(services, options);
 
-		// 1d. Register the revocation denylist, the CredentialRevoked auth-event handler, the boot-time
-		//     hydrator + its fail-closed readiness gate, and the revocation health check (ADR-0020 §8).
-		RegisterRevocation(services, builder.Configuration);
+		// 1d. Register the revocation options (from the bound settings), the denylist, the CredentialRevoked
+		//     handler, the boot hydrator + its fail-closed readiness gate, and the health check (ADR-0020 §8).
+		RegisterRevocation(services, providerSettings?.Revocation);
 
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
-		RegisterDeclaredTransports(options, services, builder.AuthBuilder);
+		RegisterDeclaredTransportSchemes(options, services, builder.AuthBuilder);
 
 		// 3. Wire the source dispatcher — the single IApiKeyClientResolver the handler calls.
 		WireDispatcher(services);
@@ -85,11 +84,11 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		return builder;
 	}
 
-	private static void BindConfiguredInstances(IAuthenticationBuilder builder) {
+	private static ApiKeyAuthenticationSettings? BindConfiguredInstances(IAuthenticationBuilder builder) {
 
 		var section = builder.Configuration.GetSection("Cirreum:Authentication:Providers:ApiKey");
 		if (!section.Exists()) {
-			return;
+			return null;
 		}
 
 		var providerSettings = section.Get<ApiKeyAuthenticationSettings>()
@@ -102,16 +101,17 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			builder.Configuration,
 			builder.AuthBuilder);
 
+		return providerSettings;
 	}
 
 	private static void RegisterValidationServices(
 		IServiceCollection services,
-		IConfiguration configuration) {
+		ApiKeyValidationOptions? validation) {
 
 		// Provider-level validation options (the two-forms knobs: configured-key strength floor +
-		// AllowWeakConfiguredKeys for Form 1; HashAlgorithm for Form 2). Defaults live on the options type.
-		services.Configure<ApiKeyValidationOptions>(
-			configuration.GetSection("Cirreum:Authentication:Providers:ApiKey:Validation"));
+		// AllowWeakConfiguredKeys for Form 1; HashAlgorithm for Form 2), sourced from the bound provider
+		// settings — defaults when no ApiKey section was configured.
+		services.AddSingleton(Options.Create(validation ?? new ApiKeyValidationOptions()));
 
 		// High-entropy key generator.
 		services.TryAddSingleton<IApiKeyGenerator, DefaultApiKeyGenerator>();
@@ -141,7 +141,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 			var resolverType = named.ResolverType;
 			var caching = named.Caching;
-			services.AddKeyedSingleton<IApiKeyClientResolver>(sourceRef, (sp, _) =>
+			services.AddKeyedSingleton(sourceRef, (sp, _) =>
 				WrapWithCaching((IApiKeyClientResolver)ActivatorUtilities.CreateInstance(sp, resolverType), caching, sp));
 		}
 
@@ -153,9 +153,9 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		}
 	}
 
-	private static void RegisterRevocation(IServiceCollection services, IConfiguration configuration) {
-		services.Configure<ApiKeyRevocationOptions>(
-			configuration.GetSection("Cirreum:Authentication:Providers:ApiKey:Revocation"));
+	private static void RegisterRevocation(IServiceCollection services, ApiKeyRevocationOptions? revocation) {
+		// Revocation options sourced from the bound provider settings — defaults when no section configured.
+		services.AddSingleton(Options.Create(revocation ?? new ApiKeyRevocationOptions()));
 
 		services.TryAddSingleton<IApiKeyDenylist, ApiKeyDenylist>();
 		services.TryAddSingleton<ApiKeyRevocationReadiness>();
@@ -184,7 +184,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		return catalog;
 	}
 
-	private static void RegisterDeclaredTransports(
+	private static void RegisterDeclaredTransportSchemes(
 		ApiKeyOptions options,
 		IServiceCollection services,
 		Microsoft.AspNetCore.Authentication.AuthenticationBuilder authBuilder) {
@@ -204,6 +204,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		foreach (var headerName in options.CustomHeaders) {
 			ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, headerName);
 		}
+
 	}
 
 	private static void WireDispatcher(IServiceCollection services) {
@@ -238,6 +239,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			inner,
 			Options.Create(cachingOptions),
 			sp.GetRequiredService<ILogger<CachingApiKeyClientResolver>>());
+
 	}
 
 }

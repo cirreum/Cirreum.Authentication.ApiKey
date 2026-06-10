@@ -1,10 +1,13 @@
 namespace Cirreum.Authentication.Configuration;
 
+using Cirreum.Authentication.ApiKey;
 using Cirreum.AuthenticationProvider.Configuration;
 using Cirreum.AuthenticationProvider;
 /// <summary>
 /// Configuration settings for the ApiKey authentication provider — a collection of
-/// per-client instances plus per-provider options.
+/// per-client instances plus per-provider options. Bound once from
+/// <c>Cirreum:Authentication:Providers:ApiKey</c>; the <see cref="Validation"/> and
+/// <see cref="Revocation"/> sub-objects bind from the matching sub-sections.
 /// </summary>
 public class ApiKeyAuthenticationSettings
 	: AuthenticationProviderSettings<ApiKeyAuthenticationInstanceSettings> {
@@ -24,6 +27,19 @@ public class ApiKeyAuthenticationSettings
 	/// Bearer-probing providers are registered.
 	/// </remarks>
 	public string? BearerPrefix { get; set; }
+
+	/// <summary>
+	/// Validation knobs (the two-forms strength floor + <c>AllowWeakConfiguredKeys</c> for Form-1
+	/// configured keys; the stored-hash algorithm for Form-2 managed keys). Binds from the
+	/// <c>Validation</c> sub-section; defaults apply when absent.
+	/// </summary>
+	public ApiKeyValidationOptions Validation { get; set; } = new();
+
+	/// <summary>
+	/// Revocation knobs (<c>AllowFaultedDenylist</c>, <c>MaxDenylistEntries</c>). Binds from the
+	/// <c>Revocation</c> sub-section; defaults apply when absent.
+	/// </summary>
+	public ApiKeyRevocationOptions Revocation { get; set; } = new();
 
 }
 

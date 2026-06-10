@@ -103,9 +103,8 @@ public class ApiKeyAuthenticationRegistrar
 		this._state.BearerPrefix = providerSettings.BearerPrefix;
 
 		// The two-forms strength knobs (Form-1 floor + AllowWeakConfiguredKeys), enforced per instance below.
-		this._validation = configuration
-			.GetSection("Cirreum:Authentication:Providers:ApiKey:Validation")
-			.Get<ApiKeyValidationOptions>() ?? new();
+		// Bound as part of the provider settings (Validation sub-section) — no separate config read.
+		this._validation = providerSettings.Validation;
 
 		if (providerSettings.Instances.Count == 0) {
 			return;
@@ -114,8 +113,7 @@ public class ApiKeyAuthenticationRegistrar
 		// Supporting services — once per Register call, only when instances exist.
 		// ConfigurationApiKeyClientResolver is registered as its concrete type rather
 		// than pinned to IApiKeyClientResolver: the AddApiKey(...) verb owns the final
-		// IApiKeyClientResolver wiring so it can compose the configuration resolver with
-		// an optional dynamic resolver (CompositeApiKeyClientResolver) when both exist.
+		// IApiKeyClientResolver wiring (the ApiKeySourceDispatcher tries config first, then sources).
 		services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
 		services.TryAddSingleton<ConfigurationApiKeyClientResolver>();
 

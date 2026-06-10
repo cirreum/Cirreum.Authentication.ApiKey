@@ -2,9 +2,9 @@ namespace Cirreum.Authentication.ApiKey;
 
 /// <summary>
 /// The typed outcome of an <see cref="IApiKeyClientResolver"/> resolution. The discriminator the
-/// <see cref="CompositeApiKeyClientResolver"/> branches on — only <see cref="NotFound"/> means "this
-/// resolver did not own the credential, try the next one"; every other outcome is a definitive answer
-/// for this credential and short-circuits the chain. Branching on this enum (not a free-text
+/// <see cref="ApiKeySourceDispatcher"/> branches on — only <see cref="NotFound"/> means "this source
+/// did not own the credential, try the next one"; every other outcome is a definitive answer for this
+/// credential and short-circuits the chain. Branching on this enum (not a free-text
 /// <c>FailureReason</c>) keeps a resolver's diagnostic wording from silently changing control flow.
 /// </summary>
 public enum ApiKeyResolveOutcome {
