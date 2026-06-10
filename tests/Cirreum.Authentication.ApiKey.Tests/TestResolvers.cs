@@ -1,6 +1,7 @@
 namespace Cirreum.Authentication.ApiKey.Tests;
 
 using Cirreum.AuthenticationProvider;
+using Microsoft.Extensions.Logging.Abstractions;
 
 /// <summary>Shared <see cref="IApiKeyClientResolver"/> test doubles and context builders.</summary>
 internal static class TestResolvers {
@@ -36,6 +37,18 @@ internal static class TestResolvers {
 			this.Calls++;
 			throw new InvalidOperationException("backing store unavailable");
 		}
+	}
+
+	/// <summary>
+	/// A real <see cref="DynamicApiKeyClientResolver"/> over a fixed in-memory store — exercises the
+	/// actual dynamic path (format check, hash verify, <see cref="StoredApiKey.ToApiKeyClient"/>) end to end.
+	/// </summary>
+	public sealed class DynamicStore(IApiKeyValidator validator, params StoredApiKey[] stored)
+		: DynamicApiKeyClientResolver(validator, NullLogger<DynamicStore>.Instance) {
+
+		protected override Task<IEnumerable<StoredApiKey>> LookupKeysAsync(
+			ApiKeyLookupContext context, CancellationToken cancellationToken) =>
+			Task.FromResult<IEnumerable<StoredApiKey>>(stored);
 	}
 
 	/// <summary>A resolver that honors cancellation by throwing when its token is cancelled.</summary>

@@ -22,6 +22,15 @@ public sealed class Pbkdf2ApiKeyHasher : IApiKeyHasher {
 	public const int DefaultIterations = 600_000;
 
 	/// <summary>
+	/// The minimum permitted iteration count (NIST SP 800-132 §5.2 work-factor floor; OWASP-aligned). A
+	/// PBKDF2 hasher cannot be constructed below this (fail fast), and verification rejects any stored hash
+	/// whose embedded iteration count is below it — so a misconfigured work factor, or a store value
+	/// poisoned/downgraded toward a trivial count, fails closed rather than verifying at negligible cost.
+	/// Below this, PBKDF2 no longer protects the imported low-entropy secrets it exists for.
+	/// </summary>
+	public const int MinIterations = 100_000;
+
+	/// <summary>
 	/// Defense-in-depth ceiling on the iteration count. Verification rejects any stored hash whose
 	/// embedded iteration count exceeds this, so a poisoned/hostile store value cannot amplify the
 	/// per-verify work into a CPU denial-of-service. Generous headroom above legitimate work factors.
@@ -33,10 +42,13 @@ public sealed class Pbkdf2ApiKeyHasher : IApiKeyHasher {
 	/// <summary>
 	/// Creates a PBKDF2 hasher.
 	/// </summary>
-	/// <param name="iterations">The work factor for newly hashed keys. Verification uses the
-	/// iteration count stored in the encoded hash, so lowering this does not break existing keys.</param>
+	/// <param name="iterations">The work factor for newly hashed keys (default <see cref="DefaultIterations"/>).
+	/// Must be at least <see cref="MinIterations"/>. Verification uses the iteration count stored in the
+	/// encoded hash, so raising this affects only newly hashed keys.</param>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="iterations"/> is below
+	/// <see cref="MinIterations"/> or above <see cref="MaxIterations"/>.</exception>
 	public Pbkdf2ApiKeyHasher(int iterations = DefaultIterations) {
-		ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
+		ArgumentOutOfRangeException.ThrowIfLessThan(iterations, MinIterations);
 		ArgumentOutOfRangeException.ThrowIfGreaterThan(iterations, MaxIterations);
 		this._iterations = iterations;
 	}
@@ -67,7 +79,9 @@ public sealed class Pbkdf2ApiKeyHasher : IApiKeyHasher {
 			return false;
 		}
 
-		if (!int.TryParse(parts[1], out var iterations) || iterations < 1 || iterations > MaxIterations) {
+		// Reject a stored count below the work-factor floor or above the anti-DoS ceiling: a poisoned or
+		// downgraded value (e.g. rewritten to a trivial iteration count) fails closed rather than verifying.
+		if (!int.TryParse(parts[1], out var iterations) || iterations < MinIterations || iterations > MaxIterations) {
 			return false;
 		}
 

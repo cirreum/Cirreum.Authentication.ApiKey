@@ -43,16 +43,6 @@ public interface IApiKeyValidator {
 	bool CompareKeysSecurely(ReadOnlySpan<byte> providedKey, ReadOnlySpan<byte> expectedKey);
 
 	/// <summary>
-	/// Validates a provided key against a stored hash.
-	/// Use this for hashed key storage (recommended for database storage).
-	/// </summary>
-	/// <param name="providedKey">The key provided in the request.</param>
-	/// <param name="storedHash">The stored hash to compare against.</param>
-	/// <param name="salt">Optional salt used in hashing.</param>
-	/// <returns><see langword="true"/> if the key matches the hash; otherwise, <see langword="false"/>.</returns>
-	bool ValidateKeyHash(string providedKey, string storedHash, string? salt = null);
-
-	/// <summary>
 	/// Checks whether an API key has expired.
 	/// </summary>
 	/// <param name="expiresAt">The expiration time, or <see langword="null"/> if no expiration.</param>
@@ -72,14 +62,6 @@ public interface IApiKeyValidator {
 	/// <param name="perKeyMaxAge">An optional per-key max-age override (may only tighten the configured cap).</param>
 	/// <returns><see langword="true"/> if the key is older than the effective max age.</returns>
 	bool IsBeyondMaxAge(DateTimeOffset? createdAt, TimeSpan? perKeyMaxAge = null);
-
-	/// <summary>
-	/// Generates a secure hash for storing an API key.
-	/// </summary>
-	/// <param name="key">The key to hash.</param>
-	/// <param name="salt">Optional salt to use (generated if not provided).</param>
-	/// <returns>The hash result containing the hash and salt used.</returns>
-	ApiKeyHashResult HashKey(string key, string? salt = null);
 
 	/// <summary>
 	/// Hashes an API key into a self-describing encoded string (PHC-style
@@ -123,9 +105,3 @@ public readonly record struct ApiKeyFormatValidationResult(bool IsValid, string?
 	public static ApiKeyFormatValidationResult Invalid(string reason) => new(false, reason);
 }
 
-/// <summary>
-/// Result of hashing an API key.
-/// </summary>
-/// <param name="Hash">The computed hash.</param>
-/// <param name="Salt">The salt used in hashing.</param>
-public readonly record struct ApiKeyHashResult(string Hash, string Salt);

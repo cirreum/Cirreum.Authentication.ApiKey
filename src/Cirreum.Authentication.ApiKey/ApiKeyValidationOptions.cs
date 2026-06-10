@@ -1,6 +1,5 @@
 namespace Cirreum.Authentication.ApiKey;
 
-using Cirreum.Authentication.Configuration;
 /// <summary>
 /// Options for API key validation behavior.
 /// </summary>
@@ -17,12 +16,13 @@ public sealed class ApiKeyValidationOptions {
 	public int MaximumKeyLength { get; set; } = 512;
 
 	/// <summary>
-	/// Gets or sets whether expired keys should be allowed.
-	/// Useful for debugging scenarios. Default is <see langword="false"/>.
+	/// Gets or sets whether expired keys should be allowed. Default is <see langword="false"/>.
 	/// </summary>
 	/// <remarks>
-	/// When enabled, expired keys will still authenticate but the expiration
-	/// status may be logged for diagnostic purposes.
+	/// When <see langword="true"/>, both key expiry <em>and</em> the SP 800-57 cryptoperiod
+	/// (<see cref="MaxKeyAge"/>) are disabled — an expired credential authenticates indefinitely. This is a
+	/// deliberate opt-down for debugging / non-production only; a boot-time advisory is logged when it is
+	/// set (see the configuration-advisory startup check). Leave <see langword="false"/> in production.
 	/// </remarks>
 	public bool AllowExpiredKeys { get; set; } = false;
 
@@ -51,8 +51,12 @@ public sealed class ApiKeyValidationOptions {
 	/// <summary>
 	/// The minimum estimated entropy (bits, per <see cref="ApiKeyEntropyEstimator"/>) a Form-1
 	/// <em>statically configured</em> key must have. Enforced at startup by the registrar. Default 112
-	/// (the NIST SP 800-63B §5.1.2 look-up-secret floor). Does NOT apply to Form-2 managed keys, which are
-	/// Cirreum-generated and strong by construction; set <see cref="AllowWeakConfiguredKeys"/> to bypass.
+	/// (the NIST SP 800-63B §5.1.2 look-up-secret floor). The configured-key strength floor is the
+	/// <em>combination</em> of this and <see cref="MinimumKeyLength"/>: a key must clear both, so for a
+	/// dense encoding (Base64Url ≈ 6 bits/char) the 32-character length gate is the binding constraint
+	/// (~192 bits) and this entropy gate mainly rejects long-but-low-diversity keys. Does NOT apply to
+	/// Form-2 managed keys, which are Cirreum-generated and strong by construction; set
+	/// <see cref="AllowWeakConfiguredKeys"/> to bypass both floors.
 	/// </summary>
 	public int MinimumKeyEntropyBits { get; set; } = DefaultApiKeyGenerator.MinimumEntropyBits;
 
@@ -76,7 +80,9 @@ public sealed class ApiKeyValidationOptions {
 	/// <summary>
 	/// The PBKDF2 work factor (iteration count) used when <see cref="HashAlgorithm"/> is
 	/// <see cref="ApiKeyHashAlgorithm.Pbkdf2"/>. Verification uses the iteration count stored in each
-	/// hash, so raising this affects only newly hashed keys.
+	/// hash, so raising this affects only newly hashed keys. Must be at least
+	/// <see cref="Pbkdf2ApiKeyHasher.MinIterations"/> (the NIST SP 800-132 / OWASP floor) — a lower value
+	/// fails fast at startup; the recommended default is <see cref="Pbkdf2ApiKeyHasher.DefaultIterations"/>.
 	/// </summary>
 	public int Pbkdf2Iterations { get; set; } = Pbkdf2ApiKeyHasher.DefaultIterations;
 

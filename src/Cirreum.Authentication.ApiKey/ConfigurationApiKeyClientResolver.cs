@@ -24,24 +24,27 @@ public sealed class ConfigurationApiKeyClientResolver(
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken = default) {
 
-		var formatResult = _validator.ValidateFormat(providedKey);
+		var formatResult = this._validator.ValidateFormat(providedKey);
 		if (!formatResult.IsValid) {
-			if (_logger.IsEnabled(LogLevel.Debug)) {
-				_logger.LogDebug(
+			if (this._logger.IsEnabled(LogLevel.Debug)) {
+				this._logger.LogDebug(
 					"API key format validation failed for transport {Transport}: {Reason}",
 					context.Transport,
 					formatResult.ErrorReason);
 			}
-			return Task.FromResult(ApiKeyResolveResult.Failed(formatResult.ErrorReason!));
+			// A format reject is a pre-match MISS for this static source, not a definitive failure for the
+			// whole chain: returning NotFound lets the dispatcher fall through to the dynamic sources, which
+			// may legitimately issue keys in a different shape (N9). Failed is reserved for a matched key.
+			return Task.FromResult(ApiKeyResolveResult.NotFound());
 		}
 
 		var entry = context.Transport.HasFlag(CredentialTransport.BearerAuthorizationHeader)
-			? _registry.ValidateBearerKey(providedKey)
-			: _registry.ValidateCustomHeaderKey(context.HeaderName, providedKey);
+			? this._registry.ValidateBearerKey(providedKey)
+			: this._registry.ValidateCustomHeaderKey(context.HeaderName, providedKey);
 
 		if (entry is null) {
-			if (_logger.IsEnabled(LogLevel.Debug)) {
-				_logger.LogDebug(
+			if (this._logger.IsEnabled(LogLevel.Debug)) {
+				this._logger.LogDebug(
 					"API key not found for transport {Transport} (header {HeaderName})",
 					context.Transport,
 					context.HeaderName);
@@ -54,12 +57,14 @@ public sealed class ConfigurationApiKeyClientResolver(
 			ClientName = entry.ClientName,
 			Roles = entry.Roles,
 			AcceptedTransports = entry.AcceptedTransports,
-			ExpiresAt = null,
+			ExpiresAt = entry.ExpiresAt,
+			CreatedAt = entry.CreatedAt,
+			MaxKeyAge = entry.MaxKeyAge,
 			Claims = null
 		};
 
-		if (_logger.IsEnabled(LogLevel.Debug)) {
-			_logger.LogDebug(
+		if (this._logger.IsEnabled(LogLevel.Debug)) {
+			this._logger.LogDebug(
 				"API key resolved for client {ClientId} via {Transport}",
 				client.ClientId,
 				context.Transport);

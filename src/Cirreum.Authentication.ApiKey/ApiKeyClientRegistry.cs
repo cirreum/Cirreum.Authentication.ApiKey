@@ -15,10 +15,13 @@ public sealed class ApiKeyClientRegistry {
 	private readonly List<ApiKeyClientEntry> _clients = [];
 
 	/// <summary>
-	/// Registers an ApiKey client entry.
+	/// Registers an ApiKey client entry. <b>Composition-time only</b> — called by the registrar while the
+	/// host is being built; the backing list is read lock-free on the request hot path, so it must not be
+	/// mutated after composition. Internal (not public) to enforce this, mirroring
+	/// <see cref="ApiKeySourceCatalog"/>.
 	/// </summary>
-	public void Register(ApiKeyClientEntry client) {
-		_clients.Add(client);
+	internal void Register(ApiKeyClientEntry client) {
+		this._clients.Add(client);
 	}
 
 	/// <summary>
@@ -28,7 +31,7 @@ public sealed class ApiKeyClientRegistry {
 	public ApiKeyClientEntry? ValidateCustomHeaderKey(string headerName, string providedKey) {
 		var providedBytes = Encoding.UTF8.GetBytes(providedKey);
 
-		foreach (var client in _clients) {
+		foreach (var client in this._clients) {
 			if (!client.AcceptedTransports.HasFlag(CredentialTransport.CustomHeader)) {
 				continue;
 			}
@@ -52,7 +55,7 @@ public sealed class ApiKeyClientRegistry {
 	public ApiKeyClientEntry? ValidateBearerKey(string providedKey) {
 		var providedBytes = Encoding.UTF8.GetBytes(providedKey);
 
-		foreach (var client in _clients) {
+		foreach (var client in this._clients) {
 			if (!client.AcceptedTransports.HasFlag(CredentialTransport.BearerAuthorizationHeader)) {
 				continue;
 			}

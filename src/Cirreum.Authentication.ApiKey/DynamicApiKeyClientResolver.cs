@@ -137,8 +137,9 @@ public abstract class DynamicApiKeyClientResolver(
 				return ApiKeyResolveResult.Expired();
 			}
 
-			// 5. Success - build client
-			var client = storedKey.ToApiKeyClient();
+			// 5. Success - build client, accepted on the transport it was presented (and matched) on, so the
+			//    handler's transport gate does not reject a dynamic-store key on a custom header (M4).
+			var client = storedKey.ToApiKeyClient(context.Transport);
 
 			if (this._logger.IsEnabled(LogLevel.Debug)) {
 				this._logger.LogDebug(

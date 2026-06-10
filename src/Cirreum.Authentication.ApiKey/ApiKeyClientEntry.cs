@@ -25,4 +25,23 @@ public sealed record ApiKeyClientEntry(
 	string ClientId,
 	string ClientName,
 	IReadOnlyList<string> Roles,
-	CredentialTransport AcceptedTransports);
+	CredentialTransport AcceptedTransports) {
+
+	/// <summary>
+	/// The optional time this configured credential was created — required to enforce
+	/// <see cref="MaxKeyAge"/> (the NIST SP 800-57 cryptoperiod) for Form-1 keys at the handler chokepoint.
+	/// </summary>
+	public DateTimeOffset? CreatedAt { get; init; }
+
+	/// <summary>
+	/// The optional expiration time for this configured credential. Enforced at the handler chokepoint
+	/// like a dynamic key's expiry, so <c>RequireExpiry</c> and explicit expiry now apply to Form-1 keys.
+	/// </summary>
+	public DateTimeOffset? ExpiresAt { get; init; }
+
+	/// <summary>
+	/// The optional per-credential maximum age (cryptoperiod) for this configured credential; may only
+	/// tighten the configured provider cap. Enforced against <see cref="CreatedAt"/> at the chokepoint.
+	/// </summary>
+	public TimeSpan? MaxKeyAge { get; init; }
+}

@@ -38,13 +38,26 @@ public sealed record ApiKeyResolveResult {
 	/// <summary>
 	/// Creates a successful resolution result.
 	/// </summary>
-	/// <param name="client">The resolved client.</param>
+	/// <param name="client">The resolved client. Must carry a non-empty <see cref="ApiKeyClient.ClientId"/>.</param>
 	/// <returns>A successful result containing the client.</returns>
-	public static ApiKeyResolveResult Success(ApiKeyClient client) =>
-		new() {
+	/// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
+	/// <exception cref="ArgumentException">
+	/// <paramref name="client"/> has a null or whitespace <see cref="ApiKeyClient.ClientId"/> — an empty
+	/// identity could neither be revoked nor used in an authorization decision, so a success may never
+	/// carry one (fail closed at the contract boundary; L4).
+	/// </exception>
+	public static ApiKeyResolveResult Success(ApiKeyClient client) {
+		ArgumentNullException.ThrowIfNull(client);
+		if (string.IsNullOrWhiteSpace(client.ClientId)) {
+			throw new ArgumentException(
+				"A resolved API key client must have a non-empty ClientId.", nameof(client));
+		}
+
+		return new() {
 			Outcome = ApiKeyResolveOutcome.Success,
-			Client = client ?? throw new ArgumentNullException(nameof(client))
+			Client = client
 		};
+	}
 
 	/// <summary>
 	/// Creates a failed resolution result with a reason. A definitive failure for this credential —

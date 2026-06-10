@@ -1,5 +1,6 @@
 namespace Cirreum.Authentication.ApiKey;
 
+using System.Buffers.Text;
 using System.Security.Cryptography;
 
 /// <summary>
@@ -20,11 +21,9 @@ public sealed class DefaultApiKeyGenerator : IApiKeyGenerator {
 		var buffer = new byte[byteCount];
 		RandomNumberGenerator.Fill(buffer);
 
-		// URL-safe, unpadded Base64 (net8-safe; avoids '+', '/', '=').
-		return Convert.ToBase64String(buffer)
-			.Replace('+', '-')
-			.Replace('/', '_')
-			.TrimEnd('=');
+		// URL-safe, unpadded Base64 (Base64Url, RFC 4648 §5) — safe in an Authorization: Bearer value or a
+		// custom header. Avoids '+', '/', '=' without the allocate-then-replace chain.
+		return Base64Url.EncodeToString(buffer);
 	}
 
 }

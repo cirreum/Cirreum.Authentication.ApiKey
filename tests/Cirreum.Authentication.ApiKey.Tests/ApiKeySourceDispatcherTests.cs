@@ -6,25 +6,17 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Proofs for <see cref="ApiKeySourceDispatcher"/> — the source router + composition engine: the
-/// fail-closed revocation gate (B1), config-first then default-fallback precedence, authoritative
-/// X-Api-Source routing (no fall-through — PB1), the X-Client-Id gate, the post-resolution denylist
-/// consult, and throwing-source containment (A6).
+/// Proofs for <see cref="ApiKeySourceDispatcher"/> — the source router + composition engine (routing
+/// ONLY): config-first then default-fallback precedence, authoritative X-Api-Source routing (no
+/// fall-through — PB1), the X-Client-Id gate, and throwing-source containment (A6). Revocation,
+/// readiness, and expiry are enforced by the handler chokepoint (see ApiKeyAuthenticationHandlerTests),
+/// not here.
 /// </summary>
 public sealed class ApiKeySourceDispatcherTests {
 
 	private const string SourceName = "partner-a";
 	private const string StaticKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCD"; // 40 chars — clears the format floor
 	private static string SourceRef => ApiKeySourceRef.Derive(SourceName);
-
-	private static ApiKeyDenylist NewDenylist() =>
-		new(Options.Create(new ApiKeyRevocationOptions()), NullLogger<ApiKeyDenylist>.Instance);
-
-	private static ApiKeyRevocationReadiness Ready() {
-		var r = new ApiKeyRevocationReadiness();
-		r.MarkReady();
-		return r;
-	}
 
 	private static ApiKeySourceCatalog CatalogWithNamedSource(bool requireClientId) {
 		var catalog = new ApiKeySourceCatalog();
@@ -53,27 +45,10 @@ public sealed class ApiKeySourceDispatcherTests {
 		ConfigurationApiKeyClientResolver? config = null,
 		ApiKeyDefaultSource? defaultSource = null,
 		IApiKeySourceCatalog? catalog = null,
-		ApiKeyDenylist? denylist = null,
-		ApiKeyRevocationReadiness? readiness = null,
 		IServiceProvider? services = null) =>
-		new(config, defaultSource, catalog ?? new ApiKeySourceCatalog(), denylist ?? NewDenylist(),
-			readiness ?? Ready(), services ?? new ServiceCollection().BuildServiceProvider(),
+		new(config, defaultSource, catalog ?? new ApiKeySourceCatalog(),
+			services ?? new ServiceCollection().BuildServiceProvider(),
 			NullLogger<ApiKeySourceDispatcher>.Instance);
-
-	// ---- Revocation gate (B1) ----
-
-	[Fact]
-	public async Task Not_ready_fails_closed_with_RevocationUnavailable_B1() {
-		var defaultStub = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client()));
-		var dispatcher = Dispatcher(
-			defaultSource: new ApiKeyDefaultSource(defaultStub, RequireClientId: false),
-			readiness: new ApiKeyRevocationReadiness());
-
-		var result = await dispatcher.ResolveAsync("k", Context());
-
-		result.Outcome.Should().Be(ApiKeyResolveOutcome.RevocationUnavailable);
-		defaultStub.Calls.Should().Be(0, "no credential is evaluated while revocation state is unknown");
-	}
 
 	// ---- Default source ----
 
@@ -127,6 +102,22 @@ public sealed class ApiKeySourceDispatcherTests {
 	}
 
 	[Fact]
+	public async Task A_config_format_reject_falls_through_to_the_default_source_N9() {
+		// A too-short key fails the config resolver's format check — that must be a soft miss (NotFound), not
+		// a chain-stopping Failed, so the dynamic default source still gets a chance at it.
+		var defaultStub = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("dynamic")));
+		var dispatcher = Dispatcher(
+			config: ConfigWithKey(StaticKey, "static-1"),
+			defaultSource: new ApiKeyDefaultSource(defaultStub, RequireClientId: false));
+
+		var result = await dispatcher.ResolveAsync("short", Context());
+
+		result.IsSuccess.Should().BeTrue();
+		result.Client!.ClientId.Should().Be("dynamic");
+		defaultStub.Calls.Should().Be(1, "the config format reject did not short-circuit the chain");
+	}
+
+	[Fact]
 	public async Task A_config_miss_falls_through_to_the_default_source() {
 		var defaultStub = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("dynamic")));
 		var dispatcher = Dispatcher(
@@ -139,20 +130,6 @@ public sealed class ApiKeySourceDispatcherTests {
 		result.IsSuccess.Should().BeTrue();
 		result.Client!.ClientId.Should().Be("dynamic");
 		defaultStub.Calls.Should().Be(1);
-	}
-
-	[Fact]
-	public async Task A_revoked_client_is_rejected_after_a_successful_resolution() {
-		var denylist = NewDenylist();
-		denylist.Revoke("client-1");
-		var dispatcher = Dispatcher(
-			defaultSource: new ApiKeyDefaultSource(
-				new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("client-1"))), RequireClientId: false),
-			denylist: denylist);
-
-		var result = await dispatcher.ResolveAsync("k", Context());
-
-		result.Outcome.Should().Be(ApiKeyResolveOutcome.NotFound, "revocation is consulted even on a resolution hit");
 	}
 
 	// ---- Addressed (named) source — authoritative ----

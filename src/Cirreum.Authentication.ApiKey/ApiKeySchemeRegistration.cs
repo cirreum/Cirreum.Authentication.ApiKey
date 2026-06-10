@@ -100,6 +100,16 @@ internal static class ApiKeySchemeRegistration {
 				nameof(headerName));
 		}
 
+		// An HTTP field-name is an RFC 7230 §3.2.6 token. Reject anything else at startup: a non-token name
+		// can never function as a real request header, and it would otherwise flow into the scheme name and
+		// the WWW-Authenticate realm and produce a malformed response header (N6).
+		if (!IsValidHttpFieldName(headerName)) {
+			throw new ArgumentException(
+				$"ApiKey custom-header name '{headerName}' is not a valid HTTP field-name (RFC 7230 token: " +
+				$"ASCII letters/digits and !#$%&'*+-.^_`|~). Choose a token-valid header name.",
+				nameof(headerName));
+		}
+
 		var schemeName = $"ApiKey:{headerName}";
 		var state = GetOrAddState(services);
 		if (!state.TryClaimScheme(schemeName)) {
@@ -115,6 +125,23 @@ internal static class ApiKeySchemeRegistration {
 
 		services.AddSingleton<ISchemeSelector>(_ =>
 			new ApiKeyHeaderSchemeSelector(schemeName, headerName));
+
+		return true;
+	}
+
+	/// <summary>
+	/// Whether <paramref name="name"/> is a valid HTTP field-name — an RFC 7230 §3.2.6 token:
+	/// <c>1*tchar</c> where <c>tchar = "!#$%&amp;'*+-.^_`|~" / DIGIT / ALPHA</c>.
+	/// </summary>
+	private static bool IsValidHttpFieldName(string name) {
+		foreach (var c in name) {
+			var ok = char.IsAsciiLetterOrDigit(c)
+				|| c is '!' or '#' or '$' or '%' or '&' or '\'' or '*'
+					or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~';
+			if (!ok) {
+				return false;
+			}
+		}
 
 		return true;
 	}

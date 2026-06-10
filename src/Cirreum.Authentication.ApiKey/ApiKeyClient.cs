@@ -40,9 +40,22 @@ public sealed record ApiKeyClient {
 	public CredentialTransport AcceptedTransports { get; init; } = CredentialTransport.BearerAuthorizationHeader;
 
 	/// <summary>
-	/// Gets the optional expiration time for this client's API key.
+	/// Gets the optional expiration time for this client's API key. Enforced at the handler chokepoint
+	/// (every credential, regardless of which resolver ran) — see <see cref="ApiKeyAuthenticationHandler"/>.
 	/// </summary>
 	public DateTimeOffset? ExpiresAt { get; init; }
+
+	/// <summary>
+	/// Gets the time this credential was created. Required to enforce <see cref="MaxKeyAge"/>
+	/// (the NIST SP 800-57 cryptoperiod) at the handler chokepoint.
+	/// </summary>
+	public DateTimeOffset? CreatedAt { get; init; }
+
+	/// <summary>
+	/// Gets an optional per-credential maximum age (cryptoperiod). Enforced against <see cref="CreatedAt"/>
+	/// at the handler chokepoint; may only <em>tighten</em> the configured provider cap.
+	/// </summary>
+	public TimeSpan? MaxKeyAge { get; init; }
 
 	/// <summary>
 	/// Gets optional custom claims to include in the client's identity.

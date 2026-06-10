@@ -1,7 +1,7 @@
 namespace Cirreum.Authentication.Configuration;
 
-using Cirreum.AuthenticationProvider.Configuration;
 using Cirreum.AuthenticationProvider;
+using Cirreum.AuthenticationProvider.Configuration;
 /// <summary>
 /// Configuration settings for an individual ApiKey authentication scheme instance.
 /// </summary>
@@ -29,5 +29,24 @@ public class ApiKeyAuthenticationInstanceSettings : HeaderAuthenticationProvider
 	/// ignored.
 	/// </remarks>
 	public CredentialTransport AcceptedTransports { get; set; } = CredentialTransport.BearerAuthorizationHeader;
+
+	/// <summary>
+	/// Gets or sets the optional time this credential was created. Required to enforce <see cref="MaxKeyAge"/>
+	/// (the NIST SP 800-57 cryptoperiod) for this configured (Form-1) key.
+	/// </summary>
+	public DateTimeOffset? CreatedAt { get; set; }
+
+	/// <summary>
+	/// Gets or sets the optional expiration time for this configured (Form-1) key. Enforced at the handler
+	/// chokepoint exactly like a dynamic key's expiry — so the provider-level <c>RequireExpiry</c> knob and an
+	/// explicit expiry now apply to configured keys (previously they were silently inert for Form-1).
+	/// </summary>
+	public DateTimeOffset? ExpiresAt { get; set; }
+
+	/// <summary>
+	/// Gets or sets the optional per-credential maximum age (cryptoperiod) for this configured key; may only
+	/// <em>tighten</em> the provider-level <c>MaxKeyAge</c>. Enforced against <see cref="CreatedAt"/>.
+	/// </summary>
+	public TimeSpan? MaxKeyAge { get; set; }
 
 }

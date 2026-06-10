@@ -1,6 +1,5 @@
 namespace Cirreum.Authentication.ApiKey;
 
-using Cirreum.Authentication.Configuration;
 using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,8 +13,7 @@ using System.Text;
 /// </remarks>
 /// <param name="options">The validation options.</param>
 /// <param name="hashers">The registered self-describing hashers (e.g. SHA-256, PBKDF2) used by
-/// <see cref="HashKeyEncoded"/> / <see cref="VerifyKey"/>. May be empty when only the legacy
-/// salted-SHA-256 path is in use.</param>
+/// <see cref="HashKeyEncoded"/> / <see cref="VerifyKey"/>.</param>
 public sealed class DefaultApiKeyValidator(
 	IOptions<ApiKeyValidationOptions> options,
 	IEnumerable<IApiKeyHasher> hashers
@@ -23,6 +21,9 @@ public sealed class DefaultApiKeyValidator(
 
 	private readonly ApiKeyValidationOptions _options = options.Value;
 	private readonly IApiKeyHasher[] _hashers = hashers as IApiKeyHasher[] ?? [.. hashers];
+
+	// Built once from the (singleton, bound) options rather than per ValidateFormat call on the hot path.
+	private readonly HashSet<char> _validCharacters = [.. options.Value.ValidCharacters];
 
 	/// <inheritdoc/>
 	public ApiKeyFormatValidationResult ValidateFormat(string key) {
@@ -41,9 +42,8 @@ public sealed class DefaultApiKeyValidator(
 		}
 
 		if (this._options.EnforceValidCharacters) {
-			var validChars = this._options.ValidCharacters.ToHashSet();
 			foreach (var c in key) {
-				if (!validChars.Contains(c)) {
+				if (!this._validCharacters.Contains(c)) {
 					return ApiKeyFormatValidationResult.Invalid(
 						$"API key contains invalid character: '{c}'");
 				}
@@ -78,6 +78,14 @@ public sealed class DefaultApiKeyValidator(
 			return false;
 		}
 
+		// Self-defending upper bound on the PRESENTED key: a public timing-safe API must not allocate
+		// proportional to an unbounded caller-supplied value (N14). A key longer than the configured maximum
+		// is invalid by policy and cannot match, so returning false early is correct (the expected key is
+		// trusted/configured and is not bounded here).
+		if (providedKey.Length > this._options.MaximumKeyLength) {
+			return false;
+		}
+
 		var providedByteCount = Encoding.UTF8.GetByteCount(providedKey);
 		var expectedByteCount = Encoding.UTF8.GetByteCount(expectedKey);
 
@@ -107,16 +115,6 @@ public sealed class DefaultApiKeyValidator(
 		}
 
 		return CryptographicOperations.FixedTimeEquals(providedKey, expectedKey);
-	}
-
-	/// <inheritdoc/>
-	public bool ValidateKeyHash(string providedKey, string storedHash, string? salt = null) {
-		if (string.IsNullOrEmpty(providedKey) || string.IsNullOrEmpty(storedHash)) {
-			return false;
-		}
-
-		var computedHash = this.HashKey(providedKey, salt);
-		return this.CompareKeysSecurely(computedHash.Hash, storedHash);
 	}
 
 	/// <inheritdoc/>
@@ -161,24 +159,6 @@ public sealed class DefaultApiKeyValidator(
 		}
 
 		return a.Value <= b.Value ? a : b;
-	}
-
-	/// <inheritdoc/>
-	public ApiKeyHashResult HashKey(string key, string? salt = null) {
-		ArgumentException.ThrowIfNullOrWhiteSpace(key);
-
-		// Generate salt if not provided
-		salt ??= GenerateSalt();
-
-		// Combine key and salt
-		var combined = $"{salt}{key}";
-		var bytes = Encoding.UTF8.GetBytes(combined);
-
-		// Use SHA256 for hashing
-		var hashBytes = SHA256.HashData(bytes);
-		var hash = Convert.ToBase64String(hashBytes);
-
-		return new ApiKeyHashResult(hash, salt);
 	}
 
 	/// <inheritdoc/>
@@ -229,14 +209,5 @@ public sealed class DefaultApiKeyValidator(
 		["sha256"] = ApiKeyHashAlgorithm.Sha256,
 		["pbkdf2"] = ApiKeyHashAlgorithm.Pbkdf2,
 	};
-
-	/// <summary>
-	/// Generates a cryptographically secure random salt.
-	/// </summary>
-	private static string GenerateSalt() {
-		var saltBytes = new byte[32];
-		RandomNumberGenerator.Fill(saltBytes);
-		return Convert.ToBase64String(saltBytes);
-	}
 
 }

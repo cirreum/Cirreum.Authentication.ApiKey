@@ -20,19 +20,35 @@ public sealed class ApiKeyHasherTests {
 
 	[Fact]
 	public void Pbkdf2_produces_a_self_describing_encoded_form_with_iterations_and_round_trips() {
-		var hasher = new Pbkdf2ApiKeyHasher(1000);
+		var hasher = new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations);
 		var encoded = hasher.Hash("a-high-entropy-secret");
 
-		encoded.Should().StartWith("pbkdf2$1000$");
+		encoded.Should().StartWith($"pbkdf2${Pbkdf2ApiKeyHasher.MinIterations}$");
 		encoded.Split('$').Should().HaveCount(4);
 		hasher.Verify("a-high-entropy-secret", encoded).Should().BeTrue();
 		hasher.Verify("a-different-secret", encoded).Should().BeFalse();
 	}
 
 	[Fact]
+	public void Pbkdf2_constructor_rejects_an_iteration_count_below_the_floor() {
+		// A misconfigured work factor cannot produce a weak hasher (N1).
+		var act = () => new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations - 1);
+		act.Should().Throw<ArgumentOutOfRangeException>();
+	}
+
+	[Fact]
+	public void Pbkdf2_rejects_a_stored_iteration_count_below_the_floor() {
+		// A store value poisoned/downgraded toward a trivial iteration count fails closed, not verifies (N1).
+		var downgraded = $"pbkdf2${Pbkdf2ApiKeyHasher.MinIterations - 1}$" +
+			Convert.ToBase64String(new byte[32]) + "$" + Convert.ToBase64String(new byte[32]);
+
+		new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations).Verify("k", downgraded).Should().BeFalse();
+	}
+
+	[Fact]
 	public void Each_hasher_refuses_a_foreign_format() {
 		var sha256 = new Sha256ApiKeyHasher();
-		var pbkdf2 = new Pbkdf2ApiKeyHasher(1000);
+		var pbkdf2 = new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations);
 
 		sha256.Verify("k", pbkdf2.Hash("k")).Should().BeFalse();
 		pbkdf2.Verify("k", sha256.Hash("k")).Should().BeFalse();
@@ -53,6 +69,6 @@ public sealed class ApiKeyHasherTests {
 		var poisoned = $"pbkdf2${Pbkdf2ApiKeyHasher.MaxIterations + 1}$" +
 			Convert.ToBase64String(new byte[32]) + "$" + Convert.ToBase64String(new byte[32]);
 
-		new Pbkdf2ApiKeyHasher(1000).Verify("k", poisoned).Should().BeFalse();
+		new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations).Verify("k", poisoned).Should().BeFalse();
 	}
 }

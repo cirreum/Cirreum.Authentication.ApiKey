@@ -1,14 +1,13 @@
 namespace Cirreum.Authentication;
 
-using System.Numerics;
 using Cirreum.Authentication.ApiKey;
 using Cirreum.Authentication.Configuration;
 using Cirreum.AuthenticationProvider;
-using Cirreum.AuthenticationProvider.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Numerics;
 
 /// <summary>
 /// Registrar for the ApiKey authentication scheme. Inherits the
@@ -142,16 +141,19 @@ public class ApiKeyAuthenticationRegistrar
 			if (apiKey.Length < this._validation.MinimumKeyLength) {
 				throw new InvalidOperationException(
 					$"Configured ApiKey for instance '{key}' is shorter than the {this._validation.MinimumKeyLength}-character " +
-					$"minimum. Use a stronger key (a generated 256-bit value is recommended), or set " +
-					$"Cirreum:Authentication:Providers:ApiKey:Validation:AllowWeakConfiguredKeys=true for non-production use.");
+					$"minimum. Prefer a generated 256-bit value (IApiKeyGenerator) or a denser encoding; to relax the bar, " +
+					$"lower Cirreum:Authentication:Providers:ApiKey:Validation:MinimumKeyLength; as a last resort for " +
+					$"non-production use, set Validation:AllowWeakConfiguredKeys=true (which disables BOTH strength floors).");
 			}
 
 			var floor = this._validation.MinimumKeyEntropyBits;
 			if (floor > 0 && ApiKeyEntropyEstimator.EstimateBits(apiKey) < floor) {
 				throw new InvalidOperationException(
-					$"Configured ApiKey for instance '{key}' is below the {floor}-bit minimum strength floor. " +
-					$"Use a stronger key (a generated 256-bit value is recommended), or set " +
-					$"Cirreum:Authentication:Providers:ApiKey:Validation:AllowWeakConfiguredKeys=true for non-production use.");
+					$"Configured ApiKey for instance '{key}' is below the {floor}-bit minimum estimated-entropy floor. " +
+					$"Prefer a generated 256-bit value (IApiKeyGenerator); if your key is already strong but in a small " +
+					$"alphabet, re-encode it denser (e.g. Base64Url) or lower " +
+					$"Cirreum:Authentication:Providers:ApiKey:Validation:MinimumKeyEntropyBits for a graded relaxation; as " +
+					$"a last resort for non-production use, set Validation:AllowWeakConfiguredKeys=true (disables BOTH floors).");
 			}
 		}
 
@@ -167,7 +169,11 @@ public class ApiKeyAuthenticationRegistrar
 			ClientId: settings.ClientId,
 			ClientName: clientName,
 			Roles: settings.Roles,
-			AcceptedTransports: settings.AcceptedTransports));
+			AcceptedTransports: settings.AcceptedTransports) {
+			CreatedAt = settings.CreatedAt,
+			ExpiresAt = settings.ExpiresAt,
+			MaxKeyAge = settings.MaxKeyAge,
+		});
 
 		// Single transport per instance (enforced by ValidateSettings) — switch
 		// dispatches to the matching scheme-registration helper. Idempotency is

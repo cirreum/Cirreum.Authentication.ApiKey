@@ -113,7 +113,21 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// Provider-level validation options (the two-forms knobs: configured-key strength floor +
 		// AllowWeakConfiguredKeys for Form 1; HashAlgorithm for Form 2), sourced from the bound provider
 		// settings — defaults when no ApiKey section was configured.
-		services.AddSingleton(Options.Create(validation ?? new ApiKeyValidationOptions()));
+		var effectiveValidation = validation ?? new ApiKeyValidationOptions();
+
+		// Fail fast at boot if the PBKDF2 work factor is below the SP 800-132 / OWASP floor — a silent
+		// sub-floor iteration count would defeat the one algorithm offered for imported low-entropy secrets
+		// (N1). Enforced here (not only in the lazily-constructed hasher) so the misconfiguration surfaces
+		// as a clean startup failure rather than a 500 on the first request.
+		if (effectiveValidation.Pbkdf2Iterations < Pbkdf2ApiKeyHasher.MinIterations) {
+			throw new InvalidOperationException(
+				$"Cirreum:Authentication:Providers:ApiKey:Validation:Pbkdf2Iterations is " +
+				$"{effectiveValidation.Pbkdf2Iterations}, below the {Pbkdf2ApiKeyHasher.MinIterations}-iteration " +
+				$"minimum (NIST SP 800-132 / OWASP). Raise it to at least {Pbkdf2ApiKeyHasher.MinIterations} " +
+				$"(the recommended default is {Pbkdf2ApiKeyHasher.DefaultIterations}).");
+		}
+
+		services.AddSingleton(Options.Create(effectiveValidation));
 
 		// High-entropy key generator.
 		services.TryAddSingleton<IApiKeyGenerator, DefaultApiKeyGenerator>();
@@ -125,13 +139,20 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher>(sp =>
 			new Pbkdf2ApiKeyHasher(
 				sp.GetRequiredService<IOptions<ApiKeyValidationOptions>>().Value.Pbkdf2Iterations)));
+
+		// Boot-time advisory: makes a dialed-down validation posture (AllowExpiredKeys / AllowWeakConfiguredKeys
+		// / no cryptoperiod) loud rather than silent (L1 / I-d). Observational only.
+		services.AddHostedService<ApiKeyConfigurationAdvisory>();
 	}
 
 	private static void RegisterSources(IServiceCollection services, ApiKeyOptions options) {
 		var catalog = GetOrAddCatalog(services);
 
 		// Named, addressable sources: each is registered in the catalog (carrying its RequireClientId
-		// policy) and its resolver is registered in DI keyed by the derived SourceRef.
+		// policy). The app resolver type is registered SCOPED and reached per-request through a
+		// scope-bridging resolver, so a scoped dependency (DbContext / repository / tenant context) is
+		// never captured on the root container (N10). A caching decorator (singleton) sits in front when
+		// configured, so only cache misses open a scope.
 		foreach (var named in options.NamedSources) {
 			var sourceRef = ApiKeySourceRef.Derive(named.FriendlyName);
 
@@ -143,14 +164,22 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 			var resolverType = named.ResolverType;
 			var caching = named.Caching;
+			services.TryAddScoped(resolverType);
 			services.AddKeyedSingleton(sourceRef, (sp, _) =>
-				WrapWithCaching((IApiKeyClientResolver)ActivatorUtilities.CreateInstance(sp, resolverType), caching, sp));
+				WrapWithCaching(
+					new ScopedApiKeyClientResolver(sp.GetRequiredService<IServiceScopeFactory>(), resolverType),
+					caching, sp));
 		}
 
-		// The default (un-named) source — the no-X-Api-Source fallback, at most one.
+		// The default (un-named) source — the no-X-Api-Source fallback, at most one. Same scoped + bridged
+		// wiring as named sources.
 		if (options.DefaultSource is { } def) {
+			var defType = def.ResolverType;
+			services.TryAddScoped(defType);
 			services.AddSingleton(sp => new ApiKeyDefaultSource(
-				WrapWithCaching((IApiKeyClientResolver)ActivatorUtilities.CreateInstance(sp, def.ResolverType), def.Caching, sp),
+				WrapWithCaching(
+					new ScopedApiKeyClientResolver(sp.GetRequiredService<IServiceScopeFactory>(), defType),
+					def.Caching, sp),
 				def.RequireClientId));
 		}
 	}
@@ -213,14 +242,14 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// The handler's IApiKeyClientResolver is the source dispatcher: it tries config first, falls back
 		// to the default source, and routes X-Api-Source to keyed named sources — never blind-scanning
 		// dynamic keys (ADR-0020 §5/§6). Config and the default source are optional (resolved as null
-		// when not registered).
+		// when not registered). The dispatcher does ROUTING only — the revocation-readiness gate, the
+		// denylist consult, and expiry/cryptoperiod are enforced by ApiKeyAuthenticationHandler (the
+		// non-replaceable chokepoint), so they hold even if an app re-registers IApiKeyClientResolver (N8).
 		services.AddSingleton<IApiKeyClientResolver>(sp =>
 			new ApiKeySourceDispatcher(
 				sp.GetService<ConfigurationApiKeyClientResolver>(),
 				sp.GetService<ApiKeyDefaultSource>(),
 				sp.GetRequiredService<IApiKeySourceCatalog>(),
-				sp.GetRequiredService<IApiKeyDenylist>(),
-				sp.GetRequiredService<ApiKeyRevocationReadiness>(),
 				sp,
 				sp.GetRequiredService<ILogger<ApiKeySourceDispatcher>>()));
 	}

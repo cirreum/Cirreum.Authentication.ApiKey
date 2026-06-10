@@ -2,7 +2,6 @@ namespace Cirreum.Authentication.ApiKey;
 
 using System.Security.Cryptography;
 using System.Text;
-using Cirreum.AuthenticationProvider;
 /// <summary>
 /// Singleton DI service carrying provider-level state for the ApiKey track. Shared
 /// across the configured-instances path (<see cref="ApiKeyAuthenticationRegistrar"/>)
@@ -50,7 +49,7 @@ internal sealed class ApiKeyProviderState {
 	/// Callers should skip the actual <c>AddScheme</c> + selector registration when
 	/// this returns <see langword="false"/>.
 	/// </summary>
-	public bool TryClaimScheme(string schemeName) => _registeredSchemes.Add(schemeName);
+	public bool TryClaimScheme(string schemeName) => this._registeredSchemes.Add(schemeName);
 
 	/// <summary>
 	/// Attempts to begin ApiKey composition. Returns <see langword="true"/> on the first
@@ -58,10 +57,10 @@ internal sealed class ApiKeyProviderState {
 	/// being called more than once per host.
 	/// </summary>
 	public bool TryBeginComposition() {
-		if (_composed) {
+		if (this._composed) {
 			return false;
 		}
-		_composed = true;
+		this._composed = true;
 		return true;
 	}
 
@@ -77,9 +76,9 @@ internal sealed class ApiKeyProviderState {
 	public void RegisterUniqueKey(string apiKey, string instanceKey, string clientId) {
 		var keyHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)));
 
-		if (!_processedKeys.TryAdd(keyHash, clientId)) {
+		if (!this._processedKeys.TryAdd(keyHash, clientId)) {
 			throw new InvalidOperationException(
-				$"API key for instance '{instanceKey}' is already registered to client '{_processedKeys[keyHash]}'. " +
+				$"API key for instance '{instanceKey}' is already registered to client '{this._processedKeys[keyHash]}'. " +
 				$"Cannot register the same key with multiple clients.");
 		}
 	}

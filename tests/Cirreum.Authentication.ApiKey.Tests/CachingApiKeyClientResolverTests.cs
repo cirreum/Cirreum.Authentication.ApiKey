@@ -68,4 +68,22 @@ public sealed class CachingApiKeyClientResolverTests {
 
 		inner.Calls.Should().Be(1);
 	}
+
+	[Fact]
+	public async Task The_cache_key_includes_the_client_index_N16() {
+		// The same key string presented under two different X-Client-Id values must NOT collide on one
+		// cache entry — otherwise one client could be authenticated as the other within the TTL.
+		var inner = new TestResolvers.Stub(ApiKeyResolveResult.Success(TestResolvers.Client("a")));
+		var caching = Caching(inner);
+
+		await caching.ResolveAsync("k", ContextWithClientId("acme"));
+		await caching.ResolveAsync("k", ContextWithClientId("globex"));
+
+		inner.Calls.Should().Be(2, "the same key under a different client index must not hit the other client's entry");
+	}
+
+	private static ApiKeyLookupContext ContextWithClientId(string clientId) =>
+		TestResolvers.Context(headers: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
+			[ApiKeyHeaders.ClientId] = clientId,
+		});
 }

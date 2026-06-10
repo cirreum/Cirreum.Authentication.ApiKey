@@ -2,6 +2,7 @@ namespace Cirreum.Authentication.ApiKey;
 
 using Cirreum.AuthenticationProvider;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -28,17 +29,24 @@ using System.Text.Encodings.Web;
 /// consistency before invoking the resolver.
 /// </para>
 /// </remarks>
-public class ApiKeyAuthenticationHandler(
+internal sealed class ApiKeyAuthenticationHandler(
 	IOptionsMonitor<ApiKeyAuthenticationOptions> options,
 	ILoggerFactory logger,
 	UrlEncoder encoder,
-	IApiKeyClientResolver clientResolver
+	IApiKeyClientResolver clientResolver,
+	IApiKeyValidator validator,
+	IApiKeyDenylist denylist,
+	ApiKeyRevocationReadiness revocationReadiness
 ) : AuthenticationHandler<ApiKeyAuthenticationOptions>(
 		options,
 		logger,
 		encoder) {
 
 	private const string BearerPrefix = "Bearer ";
+
+	/// <summary>A stable protection-space label for the <c>WWW-Authenticate</c> realm — never the internal
+	/// scheme name (which would leak the <c>ApiKey:{header}</c> transport label).</summary>
+	private const string ChallengeRealm = "ApiKey";
 
 	/// <summary>
 	/// Claim types the handler emits itself from the resolved client's first-class fields. A custom
@@ -56,6 +64,8 @@ public class ApiKeyAuthenticationHandler(
 
 	private bool _badRequest;
 	private bool _revocationUnavailable;
+	private bool _transportNotAccepted;
+	private bool _credentialPresented;
 
 	/// <inheritdoc/>
 	protected override async Task<AuthenticateResult> HandleAuthenticateAsync() {
@@ -63,6 +73,8 @@ public class ApiKeyAuthenticationHandler(
 		// Reset per-invocation state (the handler instance may be reused within a request).
 		this._badRequest = false;
 		this._revocationUnavailable = false;
+		this._transportNotAccepted = false;
+		this._credentialPresented = false;
 
 		var transport = this.Options.Transport;
 		string? providedKey;
@@ -96,6 +108,19 @@ public class ApiKeyAuthenticationHandler(
 			return AuthenticateResult.Fail($"Unsupported ApiKey transport: {transport}");
 		}
 
+		// A credential for this scheme was presented (vs. the NoResult paths above) — used to scope the 401
+		// challenge to error="invalid_token" only when a token was actually supplied (RFC 6750 §3; L3).
+		this._credentialPresented = true;
+
+		// Reject multi-valued credential / routing headers (defense-in-depth: an upstream proxy keying on a
+		// different occurrence than this handler is the classic smuggling-disagreement shape; L2). 400.
+		if (HasMultipleValues(this.Request.Headers, headerName)
+			|| HasMultipleValues(this.Request.Headers, ApiKeyHeaders.Source)
+			|| HasMultipleValues(this.Request.Headers, ApiKeyHeaders.ClientId)) {
+			this._badRequest = true;
+			return AuthenticateResult.Fail("Duplicate credential or routing header.");
+		}
+
 		var requestedSource = this.Request.Headers.TryGetValue(ApiKeyHeaders.Source, out var sourceValues)
 			? sourceValues.FirstOrDefault()
 			: null;
@@ -104,6 +129,23 @@ public class ApiKeyAuthenticationHandler(
 		}
 
 		var context = this.BuildLookupContext(transport, headerName, requestedSource);
+
+		// Revocation gate — enforced HERE, on the handler, the one chokepoint every credential passes
+		// through, so it holds regardless of which IApiKeyClientResolver is registered (an app that
+		// re-registers IApiKeyClientResolver cannot disable it). Fail closed BEFORE evaluating any credential
+		// when the denylist is not authoritative: either boot hydration is incomplete / faulted (with
+		// AllowFaultedDenylist off), OR the denylist has saturated and had to refuse a revocation (N18) — in
+		// both cases a revoked credential might slip through, so we deny rather than risk honoring one. The
+		// challenge maps this to a 503 (retry), not a 401 — the credential was never judged.
+		if (!revocationReadiness.IsReady || !denylist.IsAuthoritative) {
+			if (this.Logger.IsEnabled(LogLevel.Warning)) {
+				this.Logger.LogWarning(
+					"ApiKey revocation denylist is not authoritative (ready={Ready}, authoritative={Authoritative}); " +
+					"failing authentication closed (503).", revocationReadiness.IsReady, denylist.IsAuthoritative);
+			}
+			this._revocationUnavailable = true;
+			return AuthenticateResult.Fail("API key revocation state is temporarily unavailable");
+		}
 
 		var result = await clientResolver.ResolveAsync(
 			providedKey,
@@ -136,6 +178,38 @@ public class ApiKeyAuthenticationHandler(
 
 		var client = result.Client;
 
+		// Fail closed on an anomalous identity: a success must carry a usable credential id, or the
+		// revocation and authorization decisions below would operate on a blank subject (L4). A resolver
+		// (including the framework's own dynamic base over a NULL store column) must not authenticate a
+		// principal the denylist can never name.
+		if (string.IsNullOrWhiteSpace(client.ClientId)) {
+			if (this.Logger.IsEnabled(LogLevel.Warning)) {
+				this.Logger.LogWarning("API key resolved with an empty client id; rejecting (fail closed).");
+			}
+			return AuthenticateResult.Fail("Invalid API key");
+		}
+
+		// Revocation is enforced HERE, after the resolve, on the non-replaceable handler — so a revoked
+		// credential is rejected regardless of which resolver ran and even within a resolver's cache TTL (N8).
+		if (denylist.IsRevoked(client.ClientId)) {
+			if (this.Logger.IsEnabled(LogLevel.Warning)) {
+				this.Logger.LogWarning("API key for client {ClientId} is revoked.", client.ClientId);
+			}
+			return AuthenticateResult.Fail("Invalid API key");
+		}
+
+		// Expiry / cryptoperiod is enforced HERE too — not only inside the optional DynamicApiKeyClientResolver
+		// base class — so a custom IApiKeyClientResolver, a configured (Form-1) key, or a cache hit replaying a
+		// once-valid client cannot authenticate an expired or over-age credential (N3/N7, subsumes the cache
+		// expiry bypass M3). Honors AllowExpiredKeys / RequireExpiry / grace via the validator.
+		if (validator.IsExpired(client.ExpiresAt) || validator.IsBeyondMaxAge(client.CreatedAt, client.MaxKeyAge)) {
+			if (this.Logger.IsEnabled(LogLevel.Warning)) {
+				this.Logger.LogWarning(
+					"API key for client {ClientId} is expired or beyond its maximum age.", client.ClientId);
+			}
+			return AuthenticateResult.Fail("Invalid API key");
+		}
+
 		if (!client.AcceptedTransports.HasFlag(transport)) {
 			if (this.Logger.IsEnabled(LogLevel.Warning)) {
 				this.Logger.LogWarning(
@@ -144,6 +218,10 @@ public class ApiKeyAuthenticationHandler(
 					transport,
 					client.AcceptedTransports);
 			}
+			// The credential authenticated; refusing the transport is an authorization decision, not a
+			// failure to authenticate — surface it as a 403, not a 401 re-auth challenge the client cannot
+			// act on (RFC 9110 §15.5.4; N5).
+			this._transportNotAccepted = true;
 			return AuthenticateResult.Fail("Credential presented via an unaccepted transport.");
 		}
 
@@ -153,12 +231,23 @@ public class ApiKeyAuthenticationHandler(
 			new("client_type", "api_key")
 		};
 
-		foreach (var role in client.Roles) {
-			claims.Add(new Claim(ClaimTypes.Role, role));
+		// Roles / scopes from a (semi-trusted) store are de-duplicated and screened for control characters
+		// before projection, so a malformed/hostile store row can neither bloat the principal with repeats
+		// nor smuggle CR/LF into a downstream sink that re-emits a claim value (N13).
+		foreach (var role in client.Roles.Distinct(StringComparer.Ordinal)) {
+			if (IsSafeClaimValue(role)) {
+				claims.Add(new Claim(ClaimTypes.Role, role));
+			} else {
+				this.WarnUnsafeClaim(client.ClientId, ClaimTypes.Role);
+			}
 		}
 
-		foreach (var scope in client.Scopes) {
-			claims.Add(new Claim("scope", scope));
+		foreach (var scope in client.Scopes.Distinct(StringComparer.Ordinal)) {
+			if (IsSafeClaimValue(scope)) {
+				claims.Add(new Claim("scope", scope));
+			} else {
+				this.WarnUnsafeClaim(client.ClientId, "scope");
+			}
 		}
 
 		if (client.Claims is not null) {
@@ -172,6 +261,10 @@ public class ApiKeyAuthenticationHandler(
 							client.ClientId,
 							claimType);
 					}
+					continue;
+				}
+				if (!IsSafeClaimValue(claimValue)) {
+					this.WarnUnsafeClaim(client.ClientId, claimType);
 					continue;
 				}
 				claims.Add(new Claim(claimType, claimValue));
@@ -210,9 +303,55 @@ public class ApiKeyAuthenticationHandler(
 			return Task.CompletedTask;
 		}
 
+		if (this._transportNotAccepted) {
+			// A valid credential on an unaccepted transport is an authorization refusal, not a missing
+			// credential — 403, no WWW-Authenticate (the same key on the same transport would fail again; N5).
+			this.Response.StatusCode = 403;
+			return Task.CompletedTask;
+		}
+
 		this.Response.StatusCode = 401;
-		this.Response.Headers.WWWAuthenticate = $"Bearer realm=\"{this.Scheme.Name}\"";
+
+		// Only the Bearer transport has a standard challenge (RFC 6750). A custom-header scheme has no
+		// registered HTTP auth-scheme to advertise; emitting `Bearer` would misdirect a conformant client to
+		// a transport this scheme never reads, so we send no WWW-Authenticate for it (L3). For Bearer,
+		// error="invalid_token" is added only when a credential was actually presented and rejected
+		// (RFC 6750 §3) — never echoing the failure reason (the non-oracle posture is preserved).
+		if (this.Options.Transport == CredentialTransport.BearerAuthorizationHeader) {
+			this.Response.Headers.WWWAuthenticate = this._credentialPresented
+				? $"Bearer realm=\"{ChallengeRealm}\", error=\"invalid_token\""
+				: $"Bearer realm=\"{ChallengeRealm}\"";
+		}
+
 		return Task.CompletedTask;
+	}
+
+	private static bool HasMultipleValues(IHeaderDictionary headers, string name) =>
+		headers.TryGetValue(name, out var values) && values.Count > 1;
+
+	/// <summary>
+	/// Whether a claim value is safe to project — rejecting C0/C1 control characters (CR/LF/NUL/…) that
+	/// could corrupt a downstream sink re-emitting it (audit record, header echo, non-structured log).
+	/// RFC 9110 §5.5. Empty values are harmless.
+	/// </summary>
+	private static bool IsSafeClaimValue(string? value) {
+		if (string.IsNullOrEmpty(value)) {
+			return true;
+		}
+		foreach (var c in value) {
+			if (char.IsControl(c)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private void WarnUnsafeClaim(string clientId, string claimType) {
+		if (this.Logger.IsEnabled(LogLevel.Warning)) {
+			this.Logger.LogWarning(
+				"API key client {ClientId} supplied claim '{ClaimType}' with an unsafe (control-character) value; dropping it.",
+				clientId, claimType);
+		}
 	}
 
 	/// <inheritdoc/>

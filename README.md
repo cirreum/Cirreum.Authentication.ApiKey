@@ -137,7 +137,9 @@ var raw = generator.Generate();                 // IApiKeyGenerator — 256-bit,
 var stored = validator.HashKeyEncoded(raw);     // "sha256$…" — store THIS, hand `raw` to the client once
 ```
 
-The stored-hash algorithm is set by `Validation:HashAlgorithm` — **`Sha256`** (default; a fast salted hash, correct because managed keys are high-entropy) or **`Pbkdf2`** (a work-factored KDF, offered only for *imported* low-entropy secrets). Verification dispatches on the encoded algorithm tag and is **fail-closed**: a stored value that is not self-describing is rejected (the legacy bare-SHA-256 path is gone).
+The stored-hash algorithm is set by `Validation:HashAlgorithm` — **`Sha256`** (default; a fast salted hash, correct because managed keys are high-entropy) or **`Pbkdf2`** (a work-factored KDF, offered only for *imported* low-entropy secrets; `Validation:Pbkdf2Iterations` defaults to 600,000 and may not be set below the 100,000 floor). Verification dispatches on the encoded algorithm tag and is **fail-closed**: a stored value that is not self-describing is rejected (the legacy bare-SHA-256 path is gone).
+
+> ⚠ **If you import low-entropy secrets and select `Pbkdf2`, an edge rate-limit is REQUIRED, not optional.** ApiKey delegates throttling to the platform edge (Azure API Management / Front Door / a WAF) and performs no in-app rate-limiting. NIST SP 800-63B §5.2.2 makes throttling mandatory for a verifier protecting a low-entropy secret population, and each verification of a `Pbkdf2` key costs one full work-factored derivation — an un-throttled endpoint is a CPU-amplification surface. High-entropy managed keys (the default `Sha256` path) do not carry this obligation.
 
 ## Multi-scheme model
 

@@ -18,24 +18,18 @@ public static class ApiKeySourceRef {
 	private const int RefBytes = 10;
 
 	/// <summary>
-	/// Derives the opaque source reference for a friendly name. Plain <c>SHA-256</c> by default
-	/// (a routing-only signal, so unguessability is not required); pass an <paramref name="hmacKey"/>
-	/// (an app secret) to make the reference unguessable from the name via <c>HMAC-SHA256</c>.
+	/// Derives the opaque source reference for a friendly name via plain <c>SHA-256</c>. The reference is a
+	/// routing-only signal (not a secret): an unknown reference resolves to a generic miss and routing grants
+	/// nothing without a valid key, so unguessability is not required.
 	/// </summary>
 	/// <param name="friendlyName">The code-given store name.</param>
-	/// <param name="hmacKey">Optional HMAC key; when empty, plain SHA-256 is used.</param>
 	/// <returns>A 16-character uppercase Base32 reference.</returns>
-	public static string Derive(string friendlyName, ReadOnlySpan<byte> hmacKey = default) {
+	public static string Derive(string friendlyName) {
 		ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);
 
 		var nameBytes = Encoding.UTF8.GetBytes(friendlyName);
 		Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
-
-		if (hmacKey.IsEmpty) {
-			SHA256.HashData(nameBytes, hash);
-		} else {
-			HMACSHA256.HashData(hmacKey, nameBytes, hash);
-		}
+		SHA256.HashData(nameBytes, hash);
 
 		return Base32Encode(hash[..RefBytes]);
 	}

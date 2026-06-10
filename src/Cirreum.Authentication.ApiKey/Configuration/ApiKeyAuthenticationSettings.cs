@@ -1,8 +1,8 @@
 namespace Cirreum.Authentication.Configuration;
 
 using Cirreum.Authentication.ApiKey;
-using Cirreum.AuthenticationProvider.Configuration;
 using Cirreum.AuthenticationProvider;
+using Cirreum.AuthenticationProvider.Configuration;
 /// <summary>
 /// Configuration settings for the ApiKey authentication provider — a collection of
 /// per-client instances plus per-provider options. Bound once from

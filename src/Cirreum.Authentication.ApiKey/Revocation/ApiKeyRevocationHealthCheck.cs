@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 /// </remarks>
 internal sealed class ApiKeyRevocationHealthCheck(
 	ApiKeyRevocationReadiness readiness,
+	IApiKeyDenylist denylist,
 	IOptions<ApiKeyRevocationOptions> options
 ) : IHealthCheck {
 
@@ -31,6 +32,15 @@ internal sealed class ApiKeyRevocationHealthCheck(
 	public Task<HealthCheckResult> CheckHealthAsync(
 		HealthCheckContext context,
 		CancellationToken cancellationToken = default) {
+
+		if (!denylist.IsAuthoritative) {
+			// The denylist saturated and had to refuse a revocation — it may be missing a revoked credential,
+			// so ApiKey auth is failing closed (503). Raise the cap / move to a scale-out denylist, then restart (N18).
+			return Task.FromResult(HealthCheckResult.Unhealthy(
+				"ApiKey revocation denylist saturated and refused a revocation; ApiKey authentication is failing " +
+				"closed (503). Raise Cirreum:Authentication:Providers:ApiKey:Revocation:MaxDenylistEntries or move to " +
+				"a scale-out denylist, then restart."));
+		}
 
 		if (readiness.Faulted) {
 			return Task.FromResult(this._options.AllowFaultedDenylist

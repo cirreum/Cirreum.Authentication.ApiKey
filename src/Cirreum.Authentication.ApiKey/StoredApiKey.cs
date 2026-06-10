@@ -1,5 +1,7 @@
 namespace Cirreum.Authentication.ApiKey;
 
+using Cirreum.AuthenticationProvider;
+
 /// <summary>
 /// Represents a stored API key retrieved from a database or external source.
 /// Used by <see cref="DynamicApiKeyClientResolver"/> to standardize key storage formats.
@@ -17,8 +19,9 @@ public record StoredApiKey {
 	public required string ClientName { get; init; }
 
 	/// <summary>
-	/// Gets the hashed API key value.
-	/// Use <see cref="IApiKeyValidator.HashKey"/> to generate this value.
+	/// Gets the hashed API key value — a self-describing encoded hash (PHC-style <c>{algorithm}$…$salt$hash</c>).
+	/// Use <see cref="IApiKeyValidator.HashKeyEncoded"/> to generate this value; verification dispatches on
+	/// the encoded algorithm tag and fails closed on any non-self-describing value.
 	/// </summary>
 	public required string KeyHash { get; init; }
 
@@ -63,25 +66,28 @@ public record StoredApiKey {
 	public TimeSpan? MaxKeyAge { get; init; }
 
 	/// <summary>
-	/// Gets an optional per-key failed-attempt throttle limit (policy, not state). Persisted with the
-	/// key; enforcement is part of the in-app throttle (deferred — ADR-0020 §3/§8).
-	/// </summary>
-	public int? ThrottleLimit { get; init; }
-
-	/// <summary>
 	/// Gets optional per-key scopes, surfaced as <c>scope</c> claims on the authenticated identity.
 	/// </summary>
 	public IReadOnlyList<string>? Scopes { get; init; }
 
 	/// <summary>
-	/// Converts this stored key to an <see cref="ApiKeyClient"/> for authentication.
+	/// Converts this stored key to an <see cref="ApiKeyClient"/> for authentication, accepted on the
+	/// transport it was presented (and matched) on.
 	/// </summary>
+	/// <param name="acceptedTransport">The transport the credential arrived on. The presented key has
+	/// already matched this stored secret on this transport, so it is by definition accepted on it; this
+	/// is threaded onto <see cref="ApiKeyClient.AcceptedTransports"/> so the handler's transport gate does
+	/// not reject a dynamic-store key presented on a custom header (M4). A dynamic store that wants to
+	/// pin specific transports per key can do so in its own lookup; the default is "accept where matched".</param>
 	/// <returns>An API key client with the stored key's properties.</returns>
-	public ApiKeyClient ToApiKeyClient() => new() {
+	public ApiKeyClient ToApiKeyClient(CredentialTransport acceptedTransport) => new() {
 		ClientId = this.ClientId,
 		ClientName = this.ClientName,
 		Roles = this.Roles,
+		AcceptedTransports = acceptedTransport,
 		ExpiresAt = this.ExpiresAt,
+		CreatedAt = this.CreatedAt,
+		MaxKeyAge = this.MaxKeyAge,
 		Claims = this.Claims,
 		Scopes = this.Scopes ?? []
 	};

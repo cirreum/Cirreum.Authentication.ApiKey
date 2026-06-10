@@ -22,7 +22,9 @@ public sealed class ApiKeyRevocationHydratorTests {
 			NullLogger<ApiKeyRevocationHydrator>.Instance);
 
 	private static ApiKeyDenylist NewDenylist() =>
-		new(Options.Create(new ApiKeyRevocationOptions()), NullLogger<ApiKeyDenylist>.Instance);
+		new(Options.Create(new ApiKeyRevocationOptions()),
+			Options.Create(new ApiKeyValidationOptions()),
+			NullLogger<ApiKeyDenylist>.Instance);
 
 	private sealed class YieldingProvider(params string[] ids) : IRevokedCredentialProvider {
 		public async IAsyncEnumerable<string> GetRevokedCredentialIdsAsync(

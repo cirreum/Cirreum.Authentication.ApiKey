@@ -10,8 +10,9 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class ApiKeyDenylistTests {
 
-	private static ApiKeyDenylist Denylist(int maxEntries = 1_000_000) =>
+	private static ApiKeyDenylist Denylist(int maxEntries = 1_000_000, ApiKeyValidationOptions? validation = null) =>
 		new(Options.Create(new ApiKeyRevocationOptions { MaxDenylistEntries = maxEntries }),
+			Options.Create(validation ?? new ApiKeyValidationOptions()),
 			NullLogger<ApiKeyDenylist>.Instance);
 
 	[Fact]
@@ -41,12 +42,41 @@ public sealed class ApiKeyDenylistTests {
 	}
 
 	[Fact]
+	public void An_expired_entry_is_NOT_evicted_when_AllowExpiredKeys_is_set_N15() {
+		// The validator still honors the (expired) key, so the revocation must persist — evicting it would
+		// silently un-revoke a credential that can still authenticate.
+		var denylist = Denylist(validation: new ApiKeyValidationOptions { AllowExpiredKeys = true });
+		denylist.Revoke("cred-1", DateTimeOffset.UtcNow.AddMinutes(-1));
+
+		denylist.IsRevoked("cred-1").Should().BeTrue();
+	}
+
+	[Fact]
+	public void An_entry_within_the_expiration_grace_window_remains_revoked_N15() {
+		// The validator honors the key until expiry + grace; the denylist must not evict before then.
+		var denylist = Denylist(validation: new ApiKeyValidationOptions { ExpirationGracePeriod = TimeSpan.FromMinutes(10) });
+		denylist.Revoke("cred-1", DateTimeOffset.UtcNow.AddMinutes(-1)); // past raw expiry, within grace
+
+		denylist.IsRevoked("cred-1").Should().BeTrue();
+	}
+
+	[Fact]
 	public void Refining_an_existing_entry_expiry_keeps_it_revoked() {
 		var denylist = Denylist();
 		denylist.Revoke("cred-1");
 		denylist.Revoke("cred-1", DateTimeOffset.UtcNow.AddMinutes(5));
 
 		denylist.IsRevoked("cred-1").Should().BeTrue();
+	}
+
+	[Fact]
+	public void Refining_an_entry_never_shortens_its_retention() {
+		var denylist = Denylist();
+		denylist.Revoke("cred-1");                                       // retain until restart (null)
+		denylist.Revoke("cred-1", DateTimeOffset.UtcNow.AddMinutes(-1)); // refine to a PAST expiry
+
+		denylist.IsRevoked("cred-1").Should().BeTrue(
+			"a refine is widen-only — a past expiry cannot un-revoke a forever-retained entry");
 	}
 
 	[Fact]
@@ -60,6 +90,18 @@ public sealed class ApiKeyDenylistTests {
 		denylist.IsRevoked("cred-1").Should().BeTrue("a live revoked entry is never evicted to make room");
 		denylist.IsRevoked("cred-2").Should().BeTrue();
 		denylist.IsRevoked("cred-3").Should().BeFalse("the new revocation is refused, never honored beyond the cap");
+	}
+
+	[Fact]
+	public void Refusing_a_revocation_at_the_cap_makes_the_denylist_non_authoritative_N18() {
+		var denylist = Denylist(maxEntries: 1);
+		denylist.IsAuthoritative.Should().BeTrue();
+
+		denylist.Revoke("cred-1"); // fills the cap
+		denylist.Revoke("cred-2"); // refused — nothing reclaimable
+
+		denylist.IsAuthoritative.Should().BeFalse("a refused revocation means the denylist may be missing one — fail closed");
+		denylist.IsRevoked("cred-1").Should().BeTrue("the revocation it did record still stands");
 	}
 
 	[Fact]

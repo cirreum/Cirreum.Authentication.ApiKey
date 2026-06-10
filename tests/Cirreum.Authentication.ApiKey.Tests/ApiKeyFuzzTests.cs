@@ -13,7 +13,7 @@ public sealed class ApiKeyFuzzTests {
 	private const int Iterations = 20_000;
 
 	private static DefaultApiKeyValidator Validator() =>
-		new(Options.Create(new ApiKeyValidationOptions()), [new Sha256ApiKeyHasher(), new Pbkdf2ApiKeyHasher(1000)]);
+		new(Options.Create(new ApiKeyValidationOptions()), [new Sha256ApiKeyHasher(), new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations)]);
 
 	private static string RandomString(Random rng) {
 		var len = rng.Next(0, 80);
@@ -43,7 +43,7 @@ public sealed class ApiKeyFuzzTests {
 	[Fact]
 	public void Both_hashers_never_throw_on_arbitrary_encoded_values() {
 		var sha256 = new Sha256ApiKeyHasher();
-		var pbkdf2 = new Pbkdf2ApiKeyHasher(1000);
+		var pbkdf2 = new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations);
 		var rng = new Random(987654321);
 
 		for (var i = 0; i < Iterations; i++) {

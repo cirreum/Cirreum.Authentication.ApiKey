@@ -17,12 +17,16 @@ using Microsoft.Extensions.Logging;
 /// A source declaring <c>RequireClientId</c> is gated on the <c>X-Client-Id</c> header <em>before</em>
 /// its resolver runs, so the resolver always does an indexed lookup rather than a scan.
 /// </summary>
+/// <remarks>
+/// This type owns <b>routing only</b>. The security gates — revocation-readiness, the denylist consult,
+/// and expiry/cryptoperiod — are enforced by <see cref="ApiKeyAuthenticationHandler"/>, the non-replaceable
+/// chokepoint, so they hold even when an app re-registers <see cref="IApiKeyClientResolver"/> (N8). The
+/// dispatcher therefore never sees the denylist or the readiness flag.
+/// </remarks>
 internal sealed class ApiKeySourceDispatcher(
 	ConfigurationApiKeyClientResolver? configResolver,
 	ApiKeyDefaultSource? defaultSource,
 	IApiKeySourceCatalog catalog,
-	IApiKeyDenylist denylist,
-	ApiKeyRevocationReadiness readiness,
 	IServiceProvider services,
 	ILogger<ApiKeySourceDispatcher> logger
 ) : IApiKeyClientResolver {
@@ -35,18 +39,6 @@ internal sealed class ApiKeySourceDispatcher(
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken = default) {
 
-		// Revocation gate (ADR-0020 §8): if the denylist is not authoritative yet — boot hydration is
-		// incomplete or faulted with AllowFaultedDenylist off — fail closed before evaluating any
-		// credential. The handler maps this to a 503 (retry), not a 401.
-		if (!readiness.IsReady) {
-			if (logger.IsEnabled(LogLevel.Warning)) {
-				logger.LogWarning(
-					"ApiKey revocation denylist is not authoritative; failing authentication closed (503).");
-			}
-
-			return ApiKeyResolveResult.RevocationUnavailable();
-		}
-
 		// 1. Addressed source: an explicit X-Api-Source routes O(1) to that source's resolver, authoritatively.
 		if (!string.IsNullOrEmpty(context.RequestedSource)) {
 			return await this.ResolveAddressedAsync(providedKey, context, cancellationToken);
@@ -58,7 +50,7 @@ internal sealed class ApiKeySourceDispatcher(
 				configResolver, providedKey, context, logger, cancellationToken);
 
 			if (configResult.IsSuccess) {
-				return this.RejectIfRevoked(configResult);
+				return configResult;
 			}
 
 			// A definitive failure (e.g. a malformed credential) stands; only a plain miss falls through.
@@ -81,7 +73,7 @@ internal sealed class ApiKeySourceDispatcher(
 				defaultSource.Resolver, providedKey, context, logger, cancellationToken);
 
 			if (defaultResult.IsSuccess) {
-				return this.RejectIfRevoked(defaultResult);
+				return defaultResult;
 			}
 
 			// Failed / Expired stand; only a plain miss falls through to the no-match handling below.
@@ -134,45 +126,13 @@ internal sealed class ApiKeySourceDispatcher(
 			context.Transport, context.HeaderName, context.Headers, context.RequestedSource, source);
 
 		// Authoritative: the addressed source's answer stands (no fall-through). A throwing resolver fails
-		// closed to a miss (never a 500); cancellation propagates.
-		return this.RejectIfRevoked(await ApiKeyResolverGuard.SafeResolveAsync(
-			resolver, providedKey, routedContext, logger, cancellationToken));
+		// closed to a miss (never a 500); cancellation propagates. Revocation/expiry are applied by the
+		// handler chokepoint, not here.
+		return await ApiKeyResolverGuard.SafeResolveAsync(
+			resolver, providedKey, routedContext, logger, cancellationToken);
 	}
 
 	private static bool HasClientId(ApiKeyLookupContext context) =>
 		!string.IsNullOrWhiteSpace(context.GetHeader(ApiKeyHeaders.ClientId));
-
-	/// <summary>
-	/// Rejects a successful resolution whose credential is on the denylist (revoked), so revocation
-	/// takes effect even within a cache entry's TTL. Returns a non-descript NotFound.
-	/// </summary>
-	/// <remarks>
-	/// Fail-closed on an anomalous success: <see cref="ApiKeyResolveResult.Success"/> forbids a null
-	/// client, so a success carrying no client is a contract violation from a custom resolver. Rather
-	/// than pass it through to be caught downstream — and skip the revocation check while doing so — we
-	/// reject it here. A revocation decision must never be made on an absent identity.
-	/// </remarks>
-	private ApiKeyResolveResult RejectIfRevoked(ApiKeyResolveResult result) {
-		if (!result.IsSuccess) {
-			return result;
-		}
-
-		if (result.Client is null) {
-			logger.LogWarning(
-				"API key resolution reported success with no client; rejecting (fail closed). " +
-				"A resolver must return ApiKeyResolveResult.Success(client) with a non-null client.");
-			return ApiKeyResolveResult.NotFound();
-		}
-
-		if (denylist.IsRevoked(result.Client.ClientId)) {
-			if (logger.IsEnabled(LogLevel.Debug)) {
-				logger.LogDebug("API key for client {ClientId} is revoked (denylist).", result.Client.ClientId);
-			}
-
-			return ApiKeyResolveResult.NotFound();
-		}
-
-		return result;
-	}
 
 }

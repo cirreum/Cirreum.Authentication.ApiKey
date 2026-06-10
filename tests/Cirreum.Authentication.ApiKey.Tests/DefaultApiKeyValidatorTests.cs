@@ -12,13 +12,22 @@ public sealed class DefaultApiKeyValidatorTests {
 	private static DefaultApiKeyValidator Build(ApiKeyValidationOptions? options = null, params IApiKeyHasher[] hashers) =>
 		new(
 			Options.Create(options ?? new ApiKeyValidationOptions()),
-			hashers.Length > 0 ? hashers : [new Sha256ApiKeyHasher(), new Pbkdf2ApiKeyHasher(1000)]);
+			hashers.Length > 0 ? hashers : [new Sha256ApiKeyHasher(), new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations)]);
 
 	// ---- Constant-time comparison ----
 
 	[Fact]
 	public void CompareKeysSecurely_returns_true_for_equal_keys() {
 		Build().CompareKeysSecurely("the-same-key-value", "the-same-key-value").Should().BeTrue();
+	}
+
+	[Fact]
+	public void CompareKeysSecurely_returns_false_for_an_over_length_presented_key_N14() {
+		// The public timing-safe API must not allocate for an unbounded presented key — it bounds at the
+		// configured maximum and returns false (the key is invalid by policy and cannot match anyway).
+		var validator = Build(new ApiKeyValidationOptions { MaximumKeyLength = 64 });
+
+		validator.CompareKeysSecurely(new string('a', 65), "expected-key").Should().BeFalse();
 	}
 
 	[Theory]
@@ -78,7 +87,7 @@ public sealed class DefaultApiKeyValidatorTests {
 	[Fact]
 	public void VerifyKey_round_trips_a_pbkdf2_encoded_hash() {
 		var validator = Build();
-		var encoded = new Pbkdf2ApiKeyHasher(1000).Hash("the-raw-key");
+		var encoded = new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations).Hash("the-raw-key");
 
 		validator.VerifyKey("the-raw-key", encoded).Should().BeTrue();
 		validator.VerifyKey("the-wrong-key", encoded).Should().BeFalse();
@@ -106,7 +115,7 @@ public sealed class DefaultApiKeyValidatorTests {
 		// With only the SHA-256 hasher registered, a PBKDF2-tagged value has no hasher to dispatch to and
 		// is rejected — no other hasher's Verify is consulted for a foreign tag (algorithm-confusion guard).
 		var sha256Only = Build(hashers: new Sha256ApiKeyHasher());
-		var pbkdf2Encoded = new Pbkdf2ApiKeyHasher(1000).Hash("the-raw-key");
+		var pbkdf2Encoded = new Pbkdf2ApiKeyHasher(Pbkdf2ApiKeyHasher.MinIterations).Hash("the-raw-key");
 
 		sha256Only.VerifyKey("the-raw-key", pbkdf2Encoded).Should().BeFalse();
 	}

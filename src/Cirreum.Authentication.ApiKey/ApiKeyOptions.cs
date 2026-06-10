@@ -52,8 +52,8 @@ public sealed class ApiKeyOptions {
 		ArgumentNullException.ThrowIfNull(transports);
 		this._transportsRestricted = true;
 		foreach (var transport in transports) {
-			if (!_acceptedTransports.Contains(transport)) {
-				_acceptedTransports.Add(transport);
+			if (!this._acceptedTransports.Contains(transport)) {
+				this._acceptedTransports.Add(transport);
 			}
 		}
 		return this;
@@ -69,8 +69,8 @@ public sealed class ApiKeyOptions {
 	/// <returns>This options instance for chaining.</returns>
 	public ApiKeyOptions AddCustomTransport(string headerName) {
 		ArgumentException.ThrowIfNullOrWhiteSpace(headerName);
-		if (!_customHeaders.Contains(headerName, StringComparer.OrdinalIgnoreCase)) {
-			_customHeaders.Add(headerName);
+		if (!this._customHeaders.Contains(headerName, StringComparer.OrdinalIgnoreCase)) {
+			this._customHeaders.Add(headerName);
 		}
 		return this;
 	}
@@ -146,12 +146,12 @@ public sealed class ApiKeyOptions {
 	/// <c>AcceptTransports()</c> call. Custom headers (<see cref="CustomHeaders"/>) are additive on top.
 	/// </summary>
 	internal IReadOnlyList<ApiKeyTransport> AcceptedTransports =>
-		_transportsRestricted ? _acceptedTransports : AllWellKnownTransports;
+		this._transportsRestricted ? this._acceptedTransports : AllWellKnownTransports;
 
 	/// <summary>
 	/// Custom header transports added via <see cref="AddCustomTransport"/> — always accepted, additively.
 	/// </summary>
-	internal IReadOnlyList<string> CustomHeaders => _customHeaders;
+	internal IReadOnlyList<string> CustomHeaders => this._customHeaders;
 
 	/// <summary>
 	/// The default dynamic source, or <see langword="null"/> when none was registered.
