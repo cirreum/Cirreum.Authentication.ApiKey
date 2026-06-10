@@ -86,7 +86,9 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 	private static ApiKeyAuthenticationSettings? BindConfiguredInstances(IAuthenticationBuilder builder) {
 
-		var section = builder.Configuration.GetSection("Cirreum:Authentication:Providers:ApiKey");
+		var registrar = new ApiKeyAuthenticationRegistrar();
+		var sectionKey = GetSectionPath(registrar.ProviderType, registrar.ProviderName);
+		var section = builder.Configuration.GetSection(sectionKey);
 		if (!section.Exists()) {
 			return null;
 		}
@@ -95,7 +97,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			?? throw new InvalidOperationException(
 				"Invalid configuration for ApiKey — section exists but cannot be bound to settings.");
 
-		new ApiKeyAuthenticationRegistrar().Register(
+		registrar.Register(
 			providerSettings,
 			builder.Services,
 			builder.Configuration,
@@ -241,5 +243,8 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			sp.GetRequiredService<ILogger<CachingApiKeyClientResolver>>());
 
 	}
+
+	private static string GetSectionPath(ProviderType providerType, string providerName) =>
+		$"Cirreum:{providerType}:Providers:{providerName}";
 
 }
