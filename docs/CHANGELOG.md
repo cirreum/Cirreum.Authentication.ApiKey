@@ -13,7 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 - Initial release. Cirreum.Authentication.ApiKey is the ApiKey authentication scheme of the Cirreum framework, established as part of the **Cirreum 1.0 Foundation Reset** wave.
 - **Renamed and re-homed from the deprecated `Cirreum.Authorization.ApiKey`** under the Three Security Pillars separation. The scheme is unambiguously authentication content (every handler type was already named `ApiKey*AuthenticationHandler` / `ApiKey*AuthenticationOptions`) — the rename brings the package name in line with what it actually does.
 - **ApiKey scheme content absorbed from former `Cirreum.AuthorizationProvider.ApiKey`:**
-  - `IApiKeyClientResolver` + `ConfigurationApiKeyClientResolver` / `DynamicApiKeyClientResolver` / `CachingApiKeyClientResolver` / `CompositeApiKeyClientResolver`
+  - `IApiKeyClientResolver` + `ConfigurationApiKeyClientResolver` / `DynamicApiKeyClientResolver` / `CachingApiKeyClientResolver` (the multi-source composite is now the `ApiKeySourceDispatcher`, below)
   - `ApiKeyClient`, `ApiKeyResolveResult`, `ApiKeyLookupContext`, `StoredApiKey`
   - `IApiKeyValidator` + `DefaultApiKeyValidator`
   - `ApiKeyClientRegistry` + `ApiKeyClientEntry`

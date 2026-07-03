@@ -21,11 +21,19 @@ The rename is one step in the broader **Cirreum 1.0 Foundation Reset**, which re
 | `AddAuthorization(authz => authz.AddApiKey(...))` | `AddAuthentication(auth => auth.AddApiKey(...))` |
 | `Cirreum:Authorization:Providers:ApiKey:Instances:{name}` | `Cirreum:Authentication:Providers:ApiKey:Instances:{name}` |
 
-## New Capabilities
+> **Beyond the rename, ApiKey was substantially hardened and reworked** (two adversarial passes, ADR-0020). Your existing API keys still authenticate — it is still an API-key-in-a-header scheme — but the **registration/composition API changed**. Review the items below and the [`CHANGELOG.md`](CHANGELOG.md) for the full surface.
 
-**`Authorization: Bearer` transport.** ApiKey credentials now accept `Authorization: Bearer {key}` in addition to the legacy custom-header transport. New `ApiKeyClient` defaults to `AcceptedTransports = CredentialTransport.BearerAuthorizationHeader`; existing custom-header consumers explicitly opt in via `AcceptedTransports = CredentialTransport.CustomHeader` and `CustomHeaderName = "X-Api-Key"`.
+## New / Changed Capabilities
 
-**Selector-based dispatch.** The legacy `AuthorizationSchemeRegistry` header-to-scheme map is retired. The package ships an `ApiKeyAuthenticationSchemeSelector` implementing `ISchemeSelector` with `SchemeCategory.Machine` — the dynamic forward resolver picks ApiKey by inspecting the request for Bearer or custom-header indicators, then dispatches to the matching scheme.
+**Two-forms source model.** Dynamic key stores are now registered as **sources**: `AddDefaultSource<T>(...)` (reached without a routing header) and `AddNamedSource<T>(name, ...)` (addressable via `X-Api-Source`). The `ApiKeySourceDispatcher` composes configured (appsettings) keys + the default source + named sources in one engine — **the old `CompositeApiKeyClientResolver` is gone** (replaced by the dispatcher). *Configured* keys are startup strength-checked (length + 112-bit entropy; opt out with `Validation:AllowWeakConfiguredKeys`); *managed* source keys are 256-bit by construction.
+
+**Transport model.** `AddApiKey()` accepts all well-known transports; `AcceptTransports(...)` restricts to a subset; `AddCustomTransport(headerName)` additively layers a non-standard header. Credentials now also accept `Authorization: Bearer {key}` (RFC 6750), and there is one ASP.NET scheme per `(Provider, Transport)` tuple. An optional per-provider `BearerPrefix` (`ak_{env}_`) lets multiple Bearer-probing providers coexist.
+
+**Revocation.** `IApiKeyDenylist.Revoke(id, expiresAt?)` with a bounded denylist; a faulted boot hydration fails closed (auth returns `503`, the `apikey-revocation` health check reports `Unhealthy`) unless `Revocation:AllowFaultedDenylist`.
+
+**Single security chokepoint.** Key expiry / cryptoperiod and revocation are enforced on the non-replaceable `ApiKeyAuthenticationHandler` after every resolution — a custom resolver or a cache hit can no longer authenticate an expired or revoked credential.
+
+**Selector-based dispatch.** The legacy `AuthorizationSchemeRegistry` header-to-scheme map is retired for `ApiKeyAuthenticationSchemeSelector` (`ISchemeSelector`, `SchemeCategory.Machine`).
 
 ## Migration Walkthrough
 
@@ -38,10 +46,10 @@ The rename is one step in the broader **Cirreum 1.0 Foundation Reset**, which re
 
 ## What Didn't Change
 
-- The `ApiKeyClient` data shape (`ClientId`, `ClientName`, `Roles`, etc.) is preserved.
+- **Your existing API keys still authenticate** — the credential model and the core hash-compare verify path are preserved (constant-time compare, PBKDF2 for imported low-entropy secrets).
+- The `ApiKeyClient` core data shape (`ClientId`, `ClientName`, `Roles`) is preserved (extended with `CreatedAt` / `ExpiresAt` / `MaxKeyAge` for the expiry seam).
 - The configuration binding (instance keys = scheme names) is preserved.
-- The `IApiKeyClientResolver` family (configuration / dynamic / caching / composite) is preserved.
-- The `ApiKeyAuthenticationHandler` validates credentials the same way; only the transport-reading prelude is extended.
+- The `Configuration` / `Dynamic` / `Caching` `IApiKeyClientResolver` implementations remain; only the `Composite` resolver was replaced (by `ApiKeySourceDispatcher`).
 - ASP.NET Core authentication scheme registration via `AuthenticationBuilder` is preserved.
 
 ## Downstream Package Impact
