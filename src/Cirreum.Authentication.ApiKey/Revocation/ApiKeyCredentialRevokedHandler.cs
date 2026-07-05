@@ -24,7 +24,10 @@ internal sealed class ApiKeyCredentialRevokedHandler(
 
 		if (evt.CredentialType is null
 			|| string.Equals(evt.CredentialType, ApiKeyCredentialType, StringComparison.OrdinalIgnoreCase)) {
-			denylist.Revoke(evt.CredentialId);
+			// Thread the revoked credential's own expiry through so the denylist can safely evict the
+			// entry once the credential can no longer authenticate anyway (it never evicts to free space).
+			// null (unknown expiry) means retain until restart — see IApiKeyDenylist.Revoke.
+			denylist.Revoke(evt.CredentialId, evt.ExpiresAt);
 		}
 
 		return ValueTask.CompletedTask;

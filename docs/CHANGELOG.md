@@ -8,6 +8,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ApiKeyCredentialRevokedHandler` now threads the revoked credential's expiry into the denylist.**
+  It called `IApiKeyDenylist.Revoke(evt.CredentialId)` and dropped `CredentialRevoked.ExpiresAt`, so
+  every event-driven revocation was recorded with no expiry — a "retain until restart" entry that could
+  never be safely evicted, even after the credential's own expiry made it dead weight. Now passes
+  `evt.ExpiresAt`, so the denylist reclaims the entry once the credential can no longer authenticate
+  (the widen-only, never-evict-a-live-entry safety rules are unchanged). No behavioral change for a
+  revoked credential's authentication outcome — only denylist memory hygiene. Adds the handler's first
+  test coverage (expiry threading, credential-type filtering, null-safety).
+
 ## [1.0.1] - 2026-07-04
 
 ### Updated
