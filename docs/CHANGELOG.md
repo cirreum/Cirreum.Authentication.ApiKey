@@ -8,6 +8,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-05
+
 ### Fixed
 
 - **`ApiKeyCredentialRevokedHandler` now threads the revoked credential's expiry into the denylist.**
