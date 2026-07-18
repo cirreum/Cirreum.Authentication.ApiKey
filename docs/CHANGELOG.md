@@ -8,6 +8,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-07-18
+
 ### Fixed
 
 - **`AddApiKey()` no longer throws `ArgumentException` at composition time.** The PBKDF2 hasher was
