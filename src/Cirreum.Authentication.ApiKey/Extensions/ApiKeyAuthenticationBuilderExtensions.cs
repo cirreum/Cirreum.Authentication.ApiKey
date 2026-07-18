@@ -136,7 +136,10 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// Self-describing hashers for the dynamic model; selected per the HashAlgorithm knob and
 		// dispatched on verify by the encoded prefix.
 		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher, Sha256ApiKeyHasher>());
-		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher>(sp =>
+		// The two-generic factory overload is required here: TryAddEnumerable dedupes by implementation
+		// type and rejects a descriptor whose implementation type is the service type itself, which is
+		// what the single-generic Singleton<TService>(factory) overload produces.
+		services.TryAddEnumerable(ServiceDescriptor.Singleton<IApiKeyHasher, Pbkdf2ApiKeyHasher>(sp =>
 			new Pbkdf2ApiKeyHasher(
 				sp.GetRequiredService<IOptions<ApiKeyValidationOptions>>().Value.Pbkdf2Iterations)));
 

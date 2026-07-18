@@ -8,6 +8,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **`AddApiKey()` no longer throws `ArgumentException` at composition time.** The PBKDF2 hasher was
+  registered with the single-generic factory overload (`ServiceDescriptor.Singleton<IApiKeyHasher>(factory)`),
+  which reports the service type as its own implementation type — `TryAddEnumerable` rejects such
+  descriptors as indistinguishable, so every `AddApiKey(...)` call (bare or configured) threw before
+  `Build()`, making the provider uncomposable in 1.0.0 through 1.0.4 (GitHub issue #1). The registration
+  now uses the two-generic overload (`Singleton<IApiKeyHasher, Pbkdf2ApiKeyHasher>(factory)`), preserving
+  the lazy options-driven work-factor wiring. Adds the package's first composition-path coverage:
+  `AddApiKey()` on a bare host must compose, must yield both self-describing hashers from the container,
+  and the call-twice guard must surface as `InvalidOperationException`.
+
+## [1.0.4] - 2026-07-07
+
+### Updated
+
+- Updated NuGet packages. *(Entry backfilled — the 1.0.3/1.0.4 dependency-bump releases shipped without
+  changelog entries.)*
+
+## [1.0.3] - 2026-07-06
+
+### Updated
+
+- Updated NuGet packages. *(Entry backfilled.)*
+
 ## [1.0.2] - 2026-07-05
 
 ### Fixed
