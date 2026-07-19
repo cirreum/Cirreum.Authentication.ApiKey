@@ -15,7 +15,7 @@
 			AuthenticationContextKeys. Cirreum.Kernel, Cirreum.Contracts, Cirreum.Result,
 			and Cirreum.Providers all flow in transitively through Cirreum.AuthenticationProvider.
 		-->
-		<PackageReference Include="Cirreum.AuthenticationProvider" Version="1.2.1" />
+		<PackageReference Include="Cirreum.AuthenticationProvider" Version="1.2.2" />
 
 		<!-- ASP.NET shared framework — AuthenticationHandler<TOptions>, HttpContext, ClaimsPrincipal -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
