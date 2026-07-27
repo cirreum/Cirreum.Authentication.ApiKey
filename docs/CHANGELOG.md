@@ -8,6 +8,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **Credential expiry is threaded through revocation hydration**, following the
+  `IRevokedCredentialProvider` contract change in `Cirreum.AuthenticationProvider` 2.0.0. The
+  provider now returns `RevokedCredential` values carrying `ExpiresAt` rather than bare identifiers,
+  and the hydrator passes that through to `IApiKeyDenylist.Revoke` — so a boot-hydrated entry
+  self-evicts the way one created by a live `CredentialRevoked` event already did. Previously a
+  revocation loaded at startup was held for the denylist's full retention regardless of when the
+  credential itself expired.
+
+  **Applications implementing `IRevokedCredentialProvider` must update**: the method is
+  `GetRevokedCredentialsAsync`, returning `RevokedCredential` rather than `string`. Return
+  `new RevokedCredential(id)` to keep existing behaviour, or supply `ExpiresAt` to let entries
+  self-evict.
+
+### Security
+
+- **`ApiKeyClientRegistry` now refuses a blank key on either side of its comparison.**
+  `CryptographicOperations.FixedTimeEquals` reports two zero-length spans as equal, so a blank
+  presented key reaching the registry alongside a blank configured one would have authenticated. It
+  could not happen in the composed pipeline — `ValidateFormat` imposes a length floor on what is
+  presented and the registrar an entropy floor on what is configured — but the comparison was safe
+  only because of invariants held in two other files, while its sibling
+  `DefaultApiKeyValidator.CompareKeysSecurely` guards the same case itself. The registry now does
+  too, and skips a registered client whose key is blank.
+
+### Fixed
+
+- **A bearer credential consisting of nothing but the configured `BearerPrefix` was carried into
+  lookup as an empty key.** The custom-header transport rejects a blank credential explicitly; the
+  bearer transport did not re-check after stripping the prefix, leaving `ValidateFormat` as the only
+  thing standing between an empty string and the registry. It now returns no result, matching the
+  custom-header branch.
+
 ## [1.0.8] - 2026-07-24
 
 ### Updated

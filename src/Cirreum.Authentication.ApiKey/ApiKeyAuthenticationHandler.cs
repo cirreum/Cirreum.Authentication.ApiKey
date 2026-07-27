@@ -91,6 +91,13 @@ internal sealed class ApiKeyAuthenticationHandler(
 				providedKey = providedKey[this.Options.BearerPrefix.Length..];
 			}
 
+			// A token consisting of nothing but the prefix leaves an empty credential behind. The
+			// custom-header branch rejects a blank key explicitly; this one did not, so an empty key
+			// was carried into lookup and only ValidateFormat stopped it.
+			if (string.IsNullOrWhiteSpace(providedKey)) {
+				return AuthenticateResult.NoResult();
+			}
+
 			headerName = "Authorization";
 		} else if (transport == CredentialTransport.CustomHeader) {
 			if (string.IsNullOrWhiteSpace(this.Options.HeaderName)

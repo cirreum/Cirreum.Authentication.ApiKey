@@ -29,13 +29,21 @@ public sealed class ApiKeyClientRegistry {
 	/// when found, otherwise <see langword="null"/>. Uses constant-time comparison.
 	/// </summary>
 	public ApiKeyClientEntry? ValidateCustomHeaderKey(string headerName, string providedKey) {
+		if (IsBlank(providedKey)) {
+			return null;
+		}
+
 		var providedBytes = Encoding.UTF8.GetBytes(providedKey);
 
 		foreach (var client in this._clients) {
 			if (!client.AcceptedTransports.HasFlag(CredentialTransport.CustomHeader)) {
 				continue;
 			}
+			// Header names are case-insensitive per RFC 9110; the key below is not.
 			if (!string.Equals(client.HeaderName, headerName, StringComparison.OrdinalIgnoreCase)) {
+				continue;
+			}
+			if (IsBlank(client.Key)) {
 				continue;
 			}
 			var expectedBytes = Encoding.UTF8.GetBytes(client.Key);
@@ -53,10 +61,17 @@ public sealed class ApiKeyClientRegistry {
 	/// time comparison.
 	/// </summary>
 	public ApiKeyClientEntry? ValidateBearerKey(string providedKey) {
+		if (IsBlank(providedKey)) {
+			return null;
+		}
+
 		var providedBytes = Encoding.UTF8.GetBytes(providedKey);
 
 		foreach (var client in this._clients) {
 			if (!client.AcceptedTransports.HasFlag(CredentialTransport.BearerAuthorizationHeader)) {
+				continue;
+			}
+			if (IsBlank(client.Key)) {
 				continue;
 			}
 			var expectedBytes = Encoding.UTF8.GetBytes(client.Key);
@@ -67,5 +82,12 @@ public sealed class ApiKeyClientRegistry {
 
 		return null;
 	}
+
+	// FixedTimeEquals reports two zero-length spans as equal, so a blank presented key would match a
+	// blank configured one. Neither reaches here today — ValidateFormat imposes a length floor on
+	// what is presented, and the registrar an entropy floor on what is configured — but a credential
+	// comparison that is only safe because of invariants held in two other files is one refactor
+	// away from being wrong. DefaultApiKeyValidator.CompareKeysSecurely guards this the same way.
+	private static bool IsBlank(string? key) => string.IsNullOrWhiteSpace(key);
 
 }
