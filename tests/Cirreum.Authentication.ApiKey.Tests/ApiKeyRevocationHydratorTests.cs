@@ -27,22 +27,54 @@ public sealed class ApiKeyRevocationHydratorTests {
 			NullLogger<ApiKeyDenylist>.Instance);
 
 	private sealed class YieldingProvider(params string[] ids) : IRevokedCredentialProvider {
-		public async IAsyncEnumerable<string> GetRevokedCredentialIdsAsync(
+		public async IAsyncEnumerable<RevokedCredential> GetRevokedCredentialsAsync(
 			[EnumeratorCancellation] CancellationToken cancellationToken = default) {
 			foreach (var id in ids) {
 				await Task.Yield();
-				yield return id;
+				yield return new RevokedCredential(id);
+			}
+		}
+	}
+
+	private sealed class ExpiringProvider(params (string Id, DateTimeOffset? ExpiresAt)[] entries)
+		: IRevokedCredentialProvider {
+		public async IAsyncEnumerable<RevokedCredential> GetRevokedCredentialsAsync(
+			[EnumeratorCancellation] CancellationToken cancellationToken = default) {
+			foreach (var (id, expiresAt) in entries) {
+				await Task.Yield();
+				yield return new RevokedCredential(id, expiresAt);
 			}
 		}
 	}
 
 	private sealed class FaultingProvider : IRevokedCredentialProvider {
-		public async IAsyncEnumerable<string> GetRevokedCredentialIdsAsync(
+		public async IAsyncEnumerable<RevokedCredential> GetRevokedCredentialsAsync(
 			[EnumeratorCancellation] CancellationToken cancellationToken = default) {
 			await Task.Yield();
-			yield return "cred-1";
+			yield return new RevokedCredential("cred-1");
 			throw new InvalidOperationException("revocation source unavailable");
 		}
+	}
+
+	[Fact]
+	public async Task A_hydrated_revocation_carries_the_credential_expiry_through_to_the_denylist() {
+		// The whole point of the contract change: an entry hydrated at boot self-evicts on the
+		// credential's own expiry, the way one created by a live CredentialRevoked event already
+		// does. Previously the hydrator could only say Revoke(id) and the entry was retained until
+		// the process restarted.
+		var denylist = NewDenylist();
+		var expired = DateTimeOffset.UtcNow.AddMinutes(-1);
+		var live = DateTimeOffset.UtcNow.AddHours(1);
+		var hydrator = Hydrator(
+			[new ExpiringProvider(("already-expired", expired), ("still-live", live))],
+			denylist,
+			new ApiKeyRevocationReadiness());
+
+		await hydrator.StartAsync(CancellationToken.None);
+
+		denylist.IsRevoked("already-expired").Should().BeFalse(
+			"the credential's expiry has passed, so it can no longer authenticate anyway");
+		denylist.IsRevoked("still-live").Should().BeTrue();
 	}
 
 	[Fact]

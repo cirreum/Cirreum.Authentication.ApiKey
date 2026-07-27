@@ -42,8 +42,11 @@ internal sealed class ApiKeyRevocationHydrator(
 			var providerName = provider.GetType().Name;
 			try {
 				var count = 0;
-				await foreach (var credentialId in provider.GetRevokedCredentialIdsAsync(cancellationToken)) {
-					denylist.Revoke(credentialId);
+				// Thread the credential's own expiry through, so a hydrated entry self-evicts the way
+				// one created by a live CredentialRevoked event already does. A null expiry means
+				// "retain until restart" — safe, since over-retention only costs memory.
+				await foreach (var revoked in provider.GetRevokedCredentialsAsync(cancellationToken)) {
+					denylist.Revoke(revoked.CredentialId, revoked.ExpiresAt);
 					count++;
 				}
 
