@@ -8,6 +8,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-27
+
 ### Changed
 
 - **Credential expiry is threaded through revocation hydration**, following the
