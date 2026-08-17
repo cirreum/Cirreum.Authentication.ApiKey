@@ -3,6 +3,7 @@ namespace Cirreum.Authentication;
 using Cirreum.Authentication.ApiKey;
 using Cirreum.Authentication.Configuration;
 using Cirreum.AuthenticationProvider;
+using Cirreum.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,6 +47,13 @@ public class ApiKeyAuthenticationRegistrar
 
 	/// <inheritdoc/>
 	public override string ProviderName => "ApiKey";
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// An API key identifies a calling application, not a person — there is no subject to build a
+	/// profile for, and the caller is named after the client itself.
+	/// </remarks>
+	public override SubjectKind SubjectKind => SubjectKind.Machine;
 
 	// Bound once in Register; read per-instance in AddAuthenticationHandler for the Form-1 strength check.
 	private ApiKeyValidationOptions _validation = new();
