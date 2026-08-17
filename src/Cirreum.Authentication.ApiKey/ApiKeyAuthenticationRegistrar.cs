@@ -95,9 +95,7 @@ public class ApiKeyAuthenticationRegistrar
 	/// <inheritdoc/>
 	public override void Register(
 		ApiKeyAuthenticationSettings providerSettings,
-		IServiceCollection services,
-		IConfiguration configuration,
-		AuthenticationBuilder authBuilder) {
+		IAuthenticationBuilder builder) {
 
 		if (providerSettings is null) {
 			return;
@@ -106,7 +104,7 @@ public class ApiKeyAuthenticationRegistrar
 		// Stash provider-level state for the dynamic-resolver path. Done unconditionally —
 		// even with zero Instances, the AddApiKey(...) verb may still need the prefix when
 		// it registers the ApiKey:Bearer scheme for a declared transport.
-		this._state = ApiKeySchemeRegistration.GetOrAddState(services);
+		this._state = ApiKeySchemeRegistration.GetOrAddState(builder.Services);
 		this._state.BearerPrefix = providerSettings.BearerPrefix;
 
 		// The two-forms strength knobs (Form-1 floor + AllowWeakConfiguredKeys), enforced per instance below.
@@ -121,26 +119,24 @@ public class ApiKeyAuthenticationRegistrar
 		// ConfigurationApiKeyClientResolver is registered as its concrete type rather
 		// than pinned to IApiKeyClientResolver: the AddApiKey(...) verb owns the final
 		// IApiKeyClientResolver wiring (the ApiKeySourceDispatcher tries config first, then sources).
-		services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
-		services.TryAddSingleton<ConfigurationApiKeyClientResolver>();
+		builder.Services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
+		builder.Services.TryAddSingleton<ConfigurationApiKeyClientResolver>();
 
 		// Per-instance phase: each enabled instance contributes a client to the
 		// registry and (on first occurrence of its transport tuple) registers the
 		// matching ASP.NET scheme + selector. See AddAuthenticationHandler.
-		base.Register(providerSettings, services, configuration, authBuilder);
+		base.Register(providerSettings, builder);
 	}
 
 	/// <inheritdoc/>
 	protected override void AddAuthenticationHandler(
 		string key,
 		ApiKeyAuthenticationInstanceSettings settings,
-		IServiceCollection services,
-		IConfiguration configuration,
-		AuthenticationBuilder authBuilder) {
+		IAuthenticationBuilder builder) {
 
-		var registry = services.GetApiKeyClientRegistry();
+		var registry = builder.Services.GetApiKeyClientRegistry();
 
-		var apiKey = ResolveApiKey(key, configuration);
+		var apiKey = ResolveApiKey(key, builder.Configuration);
 
 		// Form-1 strength (ADR-0020): a statically configured key must meet the strength floor (length +
 		// entropy) unless explicitly allowed weak for demo / non-production. Fail fast at startup so a weak
@@ -191,10 +187,10 @@ public class ApiKeyAuthenticationRegistrar
 		// registry above and skip the helper's scheme registration.
 		switch (settings.AcceptedTransports) {
 			case CredentialTransport.BearerAuthorizationHeader:
-				ApiKeySchemeRegistration.TryRegisterBearer(services, authBuilder);
+				ApiKeySchemeRegistration.TryRegisterBearer(builder, this.SubjectKind);
 				break;
 			case CredentialTransport.CustomHeader:
-				ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, settings.HeaderName);
+				ApiKeySchemeRegistration.TryRegisterCustomHeader(builder, this.SubjectKind, settings.HeaderName);
 				break;
 			default:
 				throw new InvalidOperationException(

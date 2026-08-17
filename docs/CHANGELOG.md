@@ -12,6 +12,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 - **Declares `SubjectKind.Machine`.** An API key identifies a calling application, not a person:
   there is no subject to build a profile for, and the caller is named after the client itself.
+  Every ApiKey scheme is registered and declared through `IAuthenticationBuilder.AddScheme` (the
+  registration funnel, `Cirreum.AuthenticationProvider` 3.0.1) at the shared scheme-registration
+  helpers — the one birthplace of `ApiKey:{transport}` names — so the declaration reaches the
+  configured-instance path and the zero-instance dynamic-resolver path alike. Previously the
+  3.0.0 base contributed a declaration keyed on the instance key, which is never an ApiKey
+  scheme name, and the dynamic path contributed nothing.
+
+### Changed
+
+- Registrar `Register` / `AddAuthenticationHandler` and the internal scheme-registration helpers
+  take `IAuthenticationBuilder` per the `Cirreum.AuthenticationProvider` 3.0.1 contract
+  consolidation. Registrar plumbing only; not app-facing surface.
 - **`ApiKeyTransport.HeaderName()` is public.** `ApiKeyTransportExtensions` was internal, which
   left the enum write-only for consumers: an application could pass `ApiKeyTransport.XApiKey` to
   `AcceptTransports(...)` but had no way to ask what it meant, so a *calling* application had to

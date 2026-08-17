@@ -1,7 +1,7 @@
 namespace Cirreum.Authentication.ApiKey;
 
 using Cirreum.AuthenticationProvider;
-using Microsoft.AspNetCore.Authentication;
+using Cirreum.Security;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -53,27 +53,28 @@ internal static class ApiKeySchemeRegistration {
 	/// <see langword="false"/> when the scheme was already registered.
 	/// </returns>
 	public static bool TryRegisterBearer(
-		IServiceCollection services,
-		AuthenticationBuilder authBuilder) {
+		IAuthenticationBuilder builder,
+		SubjectKind subjectKind) {
 
-		var state = GetOrAddState(services);
+		var state = GetOrAddState(builder.Services);
 		if (!state.TryClaimScheme(BearerSchemeName)) {
 			return false;
 		}
 
 		var bearerPrefix = state.BearerPrefix;
 
-		authBuilder.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+		builder.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
 			BearerSchemeName,
-			options => {
+			subjectKind,
+			configureOptions: options => {
 				options.Transport = CredentialTransport.BearerAuthorizationHeader;
 				options.BearerPrefix = bearerPrefix;
 			});
 
-		services.AddSingleton(new ApiKeyBearerSchemeSelector(BearerSchemeName, bearerPrefix));
-		services.AddSingleton<ISchemeSelector>(sp =>
+		builder.Services.AddSingleton(new ApiKeyBearerSchemeSelector(BearerSchemeName, bearerPrefix));
+		builder.Services.AddSingleton<ISchemeSelector>(sp =>
 			sp.GetRequiredService<ApiKeyBearerSchemeSelector>());
-		services.AddSingleton<IBearerSchemeSelector>(sp =>
+		builder.Services.AddSingleton<IBearerSchemeSelector>(sp =>
 			sp.GetRequiredService<ApiKeyBearerSchemeSelector>());
 
 		return true;
@@ -90,8 +91,8 @@ internal static class ApiKeySchemeRegistration {
 	/// <exception cref="ArgumentException">When <paramref name="headerName"/> is
 	/// null, empty, or whitespace.</exception>
 	public static bool TryRegisterCustomHeader(
-		IServiceCollection services,
-		AuthenticationBuilder authBuilder,
+		IAuthenticationBuilder builder,
+		SubjectKind subjectKind,
 		string headerName) {
 
 		if (string.IsNullOrWhiteSpace(headerName)) {
@@ -111,19 +112,20 @@ internal static class ApiKeySchemeRegistration {
 		}
 
 		var schemeName = $"ApiKey:{headerName}";
-		var state = GetOrAddState(services);
+		var state = GetOrAddState(builder.Services);
 		if (!state.TryClaimScheme(schemeName)) {
 			return false;
 		}
 
-		authBuilder.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+		builder.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
 			schemeName,
-			options => {
+			subjectKind,
+			configureOptions: options => {
 				options.Transport = CredentialTransport.CustomHeader;
 				options.HeaderName = headerName;
 			});
 
-		services.AddSingleton<ISchemeSelector>(_ =>
+		builder.Services.AddSingleton<ISchemeSelector>(_ =>
 			new ApiKeyHeaderSchemeSelector(schemeName, headerName));
 
 		return true;

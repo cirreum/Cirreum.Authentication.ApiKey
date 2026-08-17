@@ -4,6 +4,7 @@ using Cirreum.Authentication.ApiKey;
 using Cirreum.Authentication.Configuration;
 using Cirreum.Authentication.Events;
 using Cirreum.AuthenticationProvider;
+using Cirreum.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -76,7 +77,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		RegisterRevocation(services, providerSettings?.Revocation);
 
 		// 2. Register the declared transport schemes (idempotent against step 1's schemes).
-		RegisterDeclaredTransportSchemes(options, services, builder.AuthBuilder);
+		RegisterDeclaredTransportSchemes(options, builder);
 
 		// 3. Wire the source dispatcher — the single IApiKeyClientResolver the handler calls.
 		WireDispatcher(services);
@@ -97,11 +98,7 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 			?? throw new InvalidOperationException(
 				"Invalid configuration for ApiKey — section exists but cannot be bound to settings.");
 
-		registrar.Register(
-			providerSettings,
-			builder.Services,
-			builder.Configuration,
-			builder.AuthBuilder);
+		registrar.Register(providerSettings, builder);
 
 		return providerSettings;
 	}
@@ -220,23 +217,24 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 
 	private static void RegisterDeclaredTransportSchemes(
 		ApiKeyOptions options,
-		IServiceCollection services,
-		Microsoft.AspNetCore.Authentication.AuthenticationBuilder authBuilder) {
+		IAuthenticationBuilder builder) {
 
 		// AcceptedTransports is already resolved (all well-known by default, the restricted subset, or none);
 		// custom headers are layered on top, additively. Bearer takes the Bearer path, every other
 		// transport is a custom-header scheme. Registration is idempotent (TryClaimScheme), so overlaps
 		// between a well-known transport and a same-named custom header collapse to one scheme.
+		// SubjectKind.Machine is this provider's constant: an API key identifies a calling
+		// application, whichever path registers the scheme.
 		foreach (var transport in options.AcceptedTransports) {
 			if (transport == ApiKeyTransport.Bearer) {
-				ApiKeySchemeRegistration.TryRegisterBearer(services, authBuilder);
+				ApiKeySchemeRegistration.TryRegisterBearer(builder, SubjectKind.Machine);
 			} else {
-				ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, transport.HeaderName());
+				ApiKeySchemeRegistration.TryRegisterCustomHeader(builder, SubjectKind.Machine, transport.HeaderName());
 			}
 		}
 
 		foreach (var headerName in options.CustomHeaders) {
-			ApiKeySchemeRegistration.TryRegisterCustomHeader(services, authBuilder, headerName);
+			ApiKeySchemeRegistration.TryRegisterCustomHeader(builder, SubjectKind.Machine, headerName);
 		}
 
 	}
