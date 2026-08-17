@@ -12,6 +12,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 - **Declares `SubjectKind.Machine`.** An API key identifies a calling application, not a person:
   there is no subject to build a profile for, and the caller is named after the client itself.
+- **`ApiKeyTransport.HeaderName()` is public.** `ApiKeyTransportExtensions` was internal, which
+  left the enum write-only for consumers: an application could pass `ApiKeyTransport.XApiKey` to
+  `AcceptTransports(...)` but had no way to ask what it meant, so a *calling* application had to
+  hardcode `"X-Api-Key"` to set the header on an outbound request. The enum stays the consumer
+  surface — it is now readable as well:
+
+  ```csharp
+  request.Headers.Add(ApiKeyTransport.XApiKey.HeaderName(), apiKey);
+  ```
+
+  `ApiKeyTransports` (the literals) remains internal, as its own documentation intends.
+  `HeaderName()` throws `ArgumentOutOfRangeException` for `ApiKeyTransport.Bearer`, which carries
+  its key in the standard `Authorization` header rather than a custom one — behaviour unchanged,
+  now documented on the member since the throw is publicly reachable.
 
 ### Updated
 

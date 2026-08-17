@@ -23,7 +23,7 @@ public class ApiKeyAuthenticationOptions : AuthenticationSchemeOptions {
 	/// the configured header name (e.g. <c>X-Api-Key</c>). Ignored when
 	/// <see cref="Transport"/> is Bearer.
 	/// </summary>
-	public string HeaderName { get; set; } = "X-Api-Key";
+	public string HeaderName { get; set; } = ApiKeyTransports.XApiKey;
 
 	/// <summary>
 	/// When <see cref="Transport"/> is Bearer and the provider has a configured
