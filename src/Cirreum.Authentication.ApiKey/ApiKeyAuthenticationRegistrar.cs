@@ -111,15 +111,26 @@ public class ApiKeyAuthenticationRegistrar
 		// Bound as part of the provider settings (Validation sub-section) — no separate config read.
 		this._validation = providerSettings.Validation;
 
-		if (providerSettings.Instances.Count == 0) {
+		// Gate on the ENABLED instance count, not the declared count. A declared-but-disabled instance
+		// contributes no client, so a configuration-backed resolver would have nothing to resolve; and
+		// because Enabled defaults to false, a key configured without it falls into the gap between the
+		// two counts. With no enabled instance the dispatcher resolves config to null and falls through
+		// to its sources, which is the fail-closed outcome.
+		if (!providerSettings.Instances.Values.Any(instance => instance.Enabled)) {
 			return;
 		}
 
-		// Supporting services — once per Register call, only when instances exist.
+		// Supporting services — once per Register call, only when an enabled instance exists.
+		// The client registry is added here alongside the resolver that reads it, rather than only on
+		// the per-instance path below: registering a consumer and its dependency under two different
+		// conditions leaves a descriptor that cannot be constructed, and an unconstructible descriptor
+		// throws on resolution instead of resolving to null. The resolver's other dependency,
+		// IApiKeyValidator, is owned by the AddApiKey(...) verb, which registers the validation
+		// services unconditionally on the same pass that calls this method.
 		// ConfigurationApiKeyClientResolver is registered as its concrete type rather
 		// than pinned to IApiKeyClientResolver: the AddApiKey(...) verb owns the final
 		// IApiKeyClientResolver wiring (the ApiKeySourceDispatcher tries config first, then sources).
-		builder.Services.TryAddSingleton<IApiKeyValidator, DefaultApiKeyValidator>();
+		builder.Services.GetApiKeyClientRegistry();
 		builder.Services.TryAddSingleton<ConfigurationApiKeyClientResolver>();
 
 		// Per-instance phase: each enabled instance contributes a client to the

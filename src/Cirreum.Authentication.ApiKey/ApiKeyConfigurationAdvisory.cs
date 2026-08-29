@@ -12,12 +12,21 @@ using Microsoft.Extensions.Options;
 /// </summary>
 internal sealed class ApiKeyConfigurationAdvisory(
 	IOptions<ApiKeyValidationOptions> validationOptions,
+	ApiKeyDisabledInstances disabledInstances,
 	ILogger<ApiKeyConfigurationAdvisory> logger
 ) : IHostedService {
 
 	/// <inheritdoc />
 	public Task StartAsync(CancellationToken cancellationToken) {
 		var v = validationOptions.Value;
+
+		if (disabledInstances.Names.Count > 0) {
+			logger.LogWarning(
+				"ApiKey: every configured instance ({Names}) is disabled, so no configured client is " +
+				"registered and configured-key authentication is inactive. Enabled defaults to false; set " +
+				"Cirreum:Authentication:Providers:ApiKey:Instances:{{name}}:Enabled to true to activate one.",
+				string.Join(", ", disabledInstances.Names));
+		}
 
 		if (v.AllowExpiredKeys) {
 			logger.LogWarning(

@@ -8,6 +8,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — [SemVer](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The configuration client resolver is no longer registered without the client registry it reads.**
+  `ConfigurationApiKeyClientResolver` was registered whenever the provider declared at least one
+  instance, while `ApiKeyClientRegistry` was added only while registering an *enabled* one — and
+  `Enabled` defaults to `false`. A configuration carrying a key with no explicit `Enabled` flag,
+  which is the natural shape of a developer user-secret, registered the consumer without its
+  dependency.
+
+  The consequence was not confined to start-up. `ApiKeySourceDispatcher` asks for the resolver with
+  `GetService`, which returns `null` only when nothing is registered; a registered-but-unconstructible
+  descriptor throws instead. A host validating on build refused to start, and a host without that
+  validation started cleanly and then failed every API-key authentication.
+
+  Registration is now gated on the enabled instance count rather than the declared count, and the
+  registry is added alongside the resolver that reads it. With no enabled instance the dispatcher
+  resolves configuration to `null` and falls through to its sources.
+
+- **A configuration whose instances are all disabled is reported at boot.** `Enabled` defaults to
+  `false`, and an instance skipped for it announced itself only by its absence — a key placed in
+  user-secrets read as live and behaved as though it had never been configured. The boot-time
+  advisory now names the declared instances when none of them is enabled. Declaring no instances at
+  all is a deliberate posture, dynamic sources only, and stays silent.
+
+### Updated
+
+- **Replacing `IApiKeyValidator` is documented as supported.** The validation services have always
+  registered with `TryAdd` semantics; the README and the `AddApiKey(...)` remarks now state the
+  contract, including that `TryAddSingleton` *after* `AddApiKey(...)` is a silent no-op and `Replace`
+  is the order-independent form. `DefaultApiKeyValidator` is now registered in one place rather than
+  by both the composition verb and the registrar — no behavioural change, since both registrations
+  named the same implementation and the verb always runs.
+
 ## [2.1.4] - 2026-08-25
 
 ### Updated

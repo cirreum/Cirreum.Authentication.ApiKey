@@ -207,6 +207,34 @@ IApiKeyClientResolver  (Configuration / Dynamic / Caching; ApiKeySourceDispatche
 IApiKeyDenylist  (per-request revocation consult, boot-hydrated, fail-closed)
 ```
 
+### Replacing the validator
+
+`IApiKeyValidator` carries the shared credential mechanics — request-time format checks, the
+configured-key strength floor, constant-time comparison, expiry and cryptoperiod, and the
+self-describing hash/verify pair. `AddApiKey(...)` registers `DefaultApiKeyValidator` with `TryAdd`
+semantics, so an application supplying its own implementation keeps it:
+
+```csharp
+// Before composition — TryAdd sees the registration and stands down.
+builder.Services.AddSingleton<IApiKeyValidator, MyApiKeyValidator>();
+
+builder.Services.AddAuthentication(auth => auth.AddApiKey());
+```
+
+```csharp
+// Or after composition, order-independently.
+builder.Services.AddAuthentication(auth => auth.AddApiKey());
+
+builder.Services.Replace(ServiceDescriptor.Singleton<IApiKeyValidator, MyApiKeyValidator>());
+```
+
+`TryAddSingleton` *after* `AddApiKey(...)` is the one form that does not take effect — the default is
+already registered by then, so the call is a silent no-op. Use `Replace` when registering afterwards.
+
+Every resolver reaches the validator through DI, so a replacement applies to the configuration-backed
+resolver and to dynamic sources alike. The handler's own enforcement — revocation readiness, the
+denylist consult, expiry and cryptoperiod — is not routed through this seam and holds regardless.
+
 ## Dynamic API key resolution
 
 For keys stored in a database or external system, register a dynamic **source** backed by a resolver you implement. Most apps need just one — the **default source**, reached without any routing header.

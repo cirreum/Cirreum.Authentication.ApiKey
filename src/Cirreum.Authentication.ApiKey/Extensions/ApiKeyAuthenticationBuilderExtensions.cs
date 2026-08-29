@@ -43,6 +43,11 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 	///   <item>None → the dispatcher returns 401 for every request (an orphan transport); the
 	///   boot-time auth-posture analyzer flags it.</item>
 	/// </list>
+	/// <para>
+	/// The validation services register with <c>TryAdd</c> semantics. An application supplying its own
+	/// <see cref="IApiKeyValidator"/> registers it before this call, or replaces the registration
+	/// afterwards with <see cref="ServiceCollectionDescriptorExtensions.Replace"/>.
+	/// </para>
 	/// </remarks>
 	public static IAuthenticationBuilder AddApiKey(
 		this IAuthenticationBuilder builder,
@@ -67,6 +72,9 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// 1b. Register the validation options (from the bound settings) and the crypto primitives
 		//     (key generator + self-describing hashers) used by validation (ADR-0020 P1/P2).
 		RegisterValidationServices(services, providerSettings?.Validation);
+
+		// 1b-i. Capture the declared-but-disabled instance names for the boot-time advisory.
+		RegisterInstanceAdvisory(services, providerSettings);
 
 		// 1c. Register the source catalog, the named dynamic sources (keyed by derived SourceRef for
 		//     addressable dispatch), and the default dynamic source (ADR-0020 §4/§6).
@@ -143,6 +151,24 @@ public static class ApiKeyAuthenticationBuilderExtensions {
 		// Boot-time advisory: makes a dialed-down validation posture (AllowExpiredKeys / AllowWeakConfiguredKeys
 		// / no cryptoperiod) loud rather than silent (L1 / I-d). Observational only.
 		services.AddHostedService<ApiKeyConfigurationAdvisory>();
+	}
+
+	private static void RegisterInstanceAdvisory(
+		IServiceCollection services,
+		ApiKeyAuthenticationSettings? providerSettings) {
+
+		var declared = providerSettings?.Instances;
+
+		// Reported only when instances are declared and none of them is enabled: the provider is
+		// configured yet contributes no client, and an instance skipped for Enabled announces itself
+		// only by its absence. Declaring no instances at all is a deliberate posture — dynamic sources
+		// only, or no ApiKey configuration — and is not reported.
+		var noneEnabled = declared is { Count: > 0 }
+			&& !declared.Values.Any(instance => instance.Enabled);
+
+		// Registered unconditionally so the advisory's dependency always resolves.
+		services.AddSingleton(new ApiKeyDisabledInstances(
+			noneEnabled ? [.. declared!.Keys.Order(StringComparer.Ordinal)] : []));
 	}
 
 	private static void RegisterSources(IServiceCollection services, ApiKeyOptions options) {

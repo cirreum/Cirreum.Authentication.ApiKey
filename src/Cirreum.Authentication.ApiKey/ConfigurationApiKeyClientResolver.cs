@@ -14,20 +14,16 @@ public sealed class ConfigurationApiKeyClientResolver(
 	ILogger<ConfigurationApiKeyClientResolver> logger
 ) : IApiKeyClientResolver {
 
-	private readonly ApiKeyClientRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-	private readonly IApiKeyValidator _validator = validator ?? throw new ArgumentNullException(nameof(validator));
-	private readonly ILogger<ConfigurationApiKeyClientResolver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
 	/// <inheritdoc/>
 	public Task<ApiKeyResolveResult> ResolveAsync(
 		string providedKey,
 		ApiKeyLookupContext context,
 		CancellationToken cancellationToken = default) {
 
-		var formatResult = this._validator.ValidateFormat(providedKey);
+		var formatResult = validator.ValidateFormat(providedKey);
 		if (!formatResult.IsValid) {
-			if (this._logger.IsEnabled(LogLevel.Debug)) {
-				this._logger.LogDebug(
+			if (logger.IsEnabled(LogLevel.Debug)) {
+				logger.LogDebug(
 					"API key format validation failed for transport {Transport}: {Reason}",
 					context.Transport,
 					formatResult.ErrorReason);
@@ -39,12 +35,12 @@ public sealed class ConfigurationApiKeyClientResolver(
 		}
 
 		var entry = context.Transport.HasFlag(CredentialTransport.BearerAuthorizationHeader)
-			? this._registry.ValidateBearerKey(providedKey)
-			: this._registry.ValidateCustomHeaderKey(context.HeaderName, providedKey);
+			? registry.ValidateBearerKey(providedKey)
+			: registry.ValidateCustomHeaderKey(context.HeaderName, providedKey);
 
 		if (entry is null) {
-			if (this._logger.IsEnabled(LogLevel.Debug)) {
-				this._logger.LogDebug(
+			if (logger.IsEnabled(LogLevel.Debug)) {
+				logger.LogDebug(
 					"API key not found for transport {Transport} (header {HeaderName})",
 					context.Transport,
 					context.HeaderName);
@@ -63,8 +59,8 @@ public sealed class ConfigurationApiKeyClientResolver(
 			Claims = null
 		};
 
-		if (this._logger.IsEnabled(LogLevel.Debug)) {
-			this._logger.LogDebug(
+		if (logger.IsEnabled(LogLevel.Debug)) {
+			logger.LogDebug(
 				"API key resolved for client {ClientId} via {Transport}",
 				client.ClientId,
 				context.Transport);
